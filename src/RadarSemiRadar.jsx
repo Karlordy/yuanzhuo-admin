@@ -273,7 +273,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
       legend: { show: false },
 
       // ✅ 关键修改：radius 调到 85%
-      polar: { center: ["50%", "60%"], radius: "85%" },
+      polar: { center: ["50%", "50%"], radius: "85%" },
 
       angleAxis: {
         type: "value",

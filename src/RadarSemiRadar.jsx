@@ -390,7 +390,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
                 y: p.y + p.uy * SCORE_OUT_PX + n.dyScore,
                 text: fmt2(d.score),
                 fill: "#0f172a",
-                fontSize: 16,
+                fontSize: 26,
                 fontWeight: 700,
                 textAlign: side === "right" ? "left" : "right",
                 textVerticalAlign: "middle",
@@ -426,7 +426,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
                 y: p.y + p.uy * TEXT_OUT_PX + n.dyText,
                 text: d.name,
                 fill: "#334155",
-                fontSize: 16,
+                fontSize: 24,
                 textAlign: side === "right" ? "left" : "right",
                 textVerticalAlign: "middle",
               },
@@ -457,7 +457,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
                 y: p.y,
                 text: `${d.name}\n${fmt2(score)}`,
                 fill: "#0f172a",
-                fontSize: 16,
+                fontSize: 28,
                 fontWeight: 800,
                 lineHeight: 16,
                 textAlign: "center",
@@ -479,7 +479,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
   }, [onReady]);
 
   return (
-    <div style={{ width: "100%", height: 820, overflow: "visible" }}>
+    <div style={{ width: "100%", height: 830, overflow: "visible" }}>
       <ReactECharts
         ref={chartRef}
         option={option}

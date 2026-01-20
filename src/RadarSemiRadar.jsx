@@ -126,8 +126,8 @@ const SUB_NUDGE = {
   取得成果: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   系统思考: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   平衡: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  持续产出: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  反思自省: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  持续产出: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  反思自省: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   学习者: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   沉着: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   关爱: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -140,7 +140,7 @@ const SUB_NUDGE = {
   傲慢: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
   距离感: { da: 0, drText: 0, drScore: 0, dxText: 15, dyText: 0, dxScore: 0, dyScore: 0 },
-  挑剔: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  挑剔: { da: -12, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
   完美: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   专制: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -273,7 +273,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
       legend: { show: false },
 
       // ✅ 关键修改：radius 调到 85%
-      polar: { center: ["50%", "55%"], radius: "95%" },
+      polar: { center: ["50%", "50%"], radius: "95%" },
 
       angleAxis: {
         type: "value",
@@ -453,8 +453,8 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             return {
               type: "text",
               style: {
-                x: p.x,
-                y: p.y,
+                x: p.x + 0.5,
+                y: p.y + 0.6,
                 text: `${d.name}\n${fmt2(score)}`,
                 fill: "#0f172a",
                 fontSize: 28,
@@ -479,7 +479,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
   }, [onReady]);
 
   return (
-    <div style={{ width: "100%", height: 830, overflow: "visible" }}>
+    <div style={{ width: "110%", height: 850, overflow: "visible" }}>
       <ReactECharts
         ref={chartRef}
         option={option}

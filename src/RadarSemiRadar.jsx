@@ -273,7 +273,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
       legend: { show: false },
 
       // ✅ 关键修改：radius 调到 85%
-      polar: { center: ["50%", "50%"], radius: "85%" },
+      polar: { center: ["50%", "55%"], radius: "95%" },
 
       angleAxis: {
         type: "value",
@@ -390,7 +390,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
                 y: p.y + p.uy * SCORE_OUT_PX + n.dyScore,
                 text: fmt2(d.score),
                 fill: "#0f172a",
-                fontSize: 12,
+                fontSize: 16,
                 fontWeight: 700,
                 textAlign: side === "right" ? "left" : "right",
                 textVerticalAlign: "middle",
@@ -426,7 +426,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
                 y: p.y + p.uy * TEXT_OUT_PX + n.dyText,
                 text: d.name,
                 fill: "#334155",
-                fontSize: 12,
+                fontSize: 16,
                 textAlign: side === "right" ? "left" : "right",
                 textVerticalAlign: "middle",
               },
@@ -457,7 +457,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
                 y: p.y,
                 text: `${d.name}\n${fmt2(score)}`,
                 fill: "#0f172a",
-                fontSize: 13,
+                fontSize: 16,
                 fontWeight: 800,
                 lineHeight: 16,
                 textAlign: "center",

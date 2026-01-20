@@ -121,8 +121,8 @@ function bottomMax3Names(items) {
 
 /** 子项微调 */
 const SUB_NUDGE = {
-  使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 4, dyText: 0, dxScore: 0, dyScore: 0 },
+  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 4, dyText: 0, dxScore: 0, dyScore: 0 },
   取得成果: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   系统思考: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   平衡: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -132,15 +132,15 @@ const SUB_NUDGE = {
   沉着: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   关爱: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   培育: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  团队合作: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  团队合作: { da: 0, drText: 0, drScore: 0, dxText: -4, dyText: 0, dxScore: 0, dyScore: 0 },
 
-  取悦: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  取悦: { da: 0, drText: 0, drScore: 0, dxText: -4, dyText: 0, dxScore: 0, dyScore: 0 },
   被动: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   保守: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   傲慢: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
-  距离感: { da: 0, drText: 0, drScore: 0, dxText: 15, dyText: 0, dxScore: 0, dyScore: 0 },
-  挑剔: { da: -12, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  距离感: { da: -6, drText: 0, drScore: 0, dxText: 15, dyText: 0, dxScore: 0, dyScore: 0 },
+  挑剔: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
   完美: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   专制: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -453,8 +453,8 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             return {
               type: "text",
               style: {
-                x: p.x + 0.5,
-                y: p.y + 0.6,
+                x: p.x + 1,
+                y: p.y + 1,
                 text: `${d.name}\n${fmt2(score)}`,
                 fill: "#0f172a",
                 fontSize: 28,
@@ -479,7 +479,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
   }, [onReady]);
 
   return (
-    <div style={{ width: "110%", height: 850, overflow: "visible" }}>
+    <div style={{ width: "105%", height: 850, overflow: "visible" }}>
       <ReactECharts
         ref={chartRef}
         option={option}

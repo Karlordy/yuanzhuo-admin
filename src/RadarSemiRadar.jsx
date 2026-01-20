@@ -139,7 +139,7 @@ const SUB_NUDGE = {
   保守: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   傲慢: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
-  距离感: { da: 6, drText: 0, drScore: 0, dxText: 15, dyText: 0, dxScore: 0, dyScore: 0 },
+  距离感: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   挑剔: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
   完美: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -453,13 +453,13 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             return {
               type: "text",
               style: {
-                x: p.x + 1,
-                y: p.y + 1,
+                x: p.x,
+                y: p.y,
                 text: `${d.name}\n${fmt2(score)}`,
                 fill: "#0f172a",
                 fontSize: 28,
                 fontWeight: 800,
-                lineHeight: 24,
+                lineHeight: 28,
                 textAlign: "center",
                 textVerticalAlign: "middle",
               },

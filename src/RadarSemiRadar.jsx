@@ -124,11 +124,11 @@ const SUB_NUDGE = {
   使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 6, dyText: 0, dxScore: 0, dyScore: 0 },
   战略关注: { da: 0, drText: 0, drScore: 0, dxText: 6, dyText: 0, dxScore: 0, dyScore: 0 },
   取得成果: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  系统思考: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  平衡: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  系统思考: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  平衡: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   持续产出: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   反思自省: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  学习者: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  学习者: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   沉着: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   关爱: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   培育: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -139,7 +139,7 @@ const SUB_NUDGE = {
   保守: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   傲慢: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
-  距离感: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  距离感: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   挑剔: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
   完美: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },

@@ -1,4 +1,4 @@
-// RadarSemiRadar.jsx
+// src/RadarSemiRadar.jsx
 import React, {
   useEffect,
   useMemo,
@@ -166,31 +166,27 @@ function createExportApi(chartRef) {
     const inst = chartRef.current?.getEchartsInstance?.();
     if (!inst) throw new Error("ECharts instance not ready");
 
-    const { pixelRatio = 2, backgroundColor = "#ffffff", excludeComponents = ["toolbox"] } = opts;
+    const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor } = opts;
 
-    // 双保险：避免隐藏容器尺寸/首帧问题
     try {
       inst.resize?.();
     } catch {}
 
-    return inst.getDataURL({
+    const payload = {
       type: "png",
       pixelRatio,
-      backgroundColor,
       excludeComponents,
-    });
+      ...(backgroundColor != null ? { backgroundColor } : {}), // 不传 => 透明背景
+    };
+
+    return inst.getDataURL(payload);
   };
 
   const exportPngAsync = (opts = {}) => {
     const inst = chartRef.current?.getEchartsInstance?.();
     if (!inst) return Promise.reject(new Error("ECharts instance not ready"));
 
-    const {
-      pixelRatio = 2,
-      backgroundColor = "#ffffff",
-      excludeComponents = ["toolbox"],
-      timeoutMs = 3000,
-    } = opts;
+    const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor, timeoutMs = 3000 } = opts;
 
     return new Promise((resolve, reject) => {
       let done = false;
@@ -204,12 +200,13 @@ function createExportApi(chartRef) {
 
         try {
           inst.resize?.();
-          const url = inst.getDataURL({
+          const payload = {
             type: "png",
             pixelRatio,
-            backgroundColor,
             excludeComponents,
-          });
+            ...(backgroundColor != null ? { backgroundColor } : {}), // 不传 => 透明背景
+          };
+          const url = inst.getDataURL(payload);
           resolve(url);
         } catch (e) {
           reject(e);
@@ -236,13 +233,12 @@ function createExportApi(chartRef) {
   return { exportPng, exportPngAsync };
 }
 
-/** ✅ 改为 forwardRef：父组件可直接 radarRef.current.exportPng() */
+/** ✅ forwardRef：父组件可直接 radarRef.current.exportPng() */
 const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores, onReady }, ref) {
   if (!subScores || !dimScores) return null;
 
   const chartRef = useRef(null);
 
-  // 1) 暴露给父组件 ref
   useImperativeHandle(ref, () => createExportApi(chartRef), []);
 
   const segments = useMemo(() => {
@@ -276,7 +272,8 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
       animation: false,
       legend: { show: false },
 
-      polar: { center: ["50%", "60%"], radius: "66%" },
+      // ✅ 关键修改：radius 调到 85%
+      polar: { center: ["50%", "60%"], radius: "85%" },
 
       angleAxis: {
         type: "value",
@@ -473,10 +470,9 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
     };
   }, [segments, dimScores, hiTopMin3, hiBottomMax3]);
 
-  // 2) 继续支持你原来的 onReady(api) 方式
+  // 继续支持 onReady(api)
   useEffect(() => {
     if (typeof onReady !== "function") return;
-
     const api = createExportApi(chartRef);
     onReady(api);
     return () => onReady(null);

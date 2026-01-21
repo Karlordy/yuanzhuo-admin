@@ -122,7 +122,7 @@ function bottomMax3Names(items) {
 /** 子项微调 */
 const SUB_NUDGE = {
   使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 0, dxScore: 0, dyScore: 0 },
-  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 0, dxScore: 0, dyScore: 0 },
+  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 3, dxScore: 0, dyScore: 0 },
   取得成果: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   系统思考: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   平衡: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -273,7 +273,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
       legend: { show: false },
 
       // ✅ 关键修改：radius 调到 85%
-      polar: { center: ["50%", "60%"], radius: "95%" },
+      polar: { center: ["50%", "55%"], radius: "90%" },
 
       angleAxis: {
         type: "value",
@@ -479,7 +479,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
   }, [onReady]);
 
   return (
-    <div style={{ width: "105%", height: 850, overflow: "visible" }}>
+    <div style={{ width: "100%", height: 900, overflow: "visible" }}>
       <ReactECharts
         ref={chartRef}
         option={option}

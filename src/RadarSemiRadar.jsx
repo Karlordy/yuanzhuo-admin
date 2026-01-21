@@ -121,8 +121,8 @@ function bottomMax3Names(items) {
 
 /** 子项微调 */
 const SUB_NUDGE = {
-  使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 6, dyText: 0, dxScore: 0, dyScore: 0 },
-  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 6, dyText: 0, dxScore: 0, dyScore: 0 },
+  使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 0, dxScore: 0, dyScore: 0 },
+  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 0, dxScore: 0, dyScore: 0 },
   取得成果: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   系统思考: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   平衡: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -131,10 +131,10 @@ const SUB_NUDGE = {
   学习者: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   沉着: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   关爱: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  培育: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  团队合作: { da: 0, drText: 0, drScore: 0, dxText: -6, dyText: 0, dxScore: 0, dyScore: 0 },
+  培育: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: -3, dxScore: 0, dyScore: 0 },
+  团队合作: { da: 0, drText: 0, drScore: 0, dxText: -9, dyText: 0, dxScore: 0, dyScore: 0 },
 
-  取悦: { da: 0, drText: 0, drScore: 0, dxText: -6, dyText: 0, dxScore: 0, dyScore: 0 },
+  取悦: { da: 0, drText: 0, drScore: 0, dxText: -9, dyText: 0, dxScore: 0, dyScore: 0 },
   被动: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   保守: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   傲慢: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -273,7 +273,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
       legend: { show: false },
 
       // ✅ 关键修改：radius 调到 85%
-      polar: { center: ["50%", "50%"], radius: "95%" },
+      polar: { center: ["50%", "60%"], radius: "95%" },
 
       angleAxis: {
         type: "value",

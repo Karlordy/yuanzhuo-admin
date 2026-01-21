@@ -273,7 +273,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
       legend: { show: false },
 
       // ✅ 关键修改：radius 调到 85%
-      polar: { center: ["50%", "57%"], radius: "90%" },
+      polar: { center: ["50%", "52%"], radius: "87%" },
 
       angleAxis: {
         type: "value",
@@ -479,7 +479,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
   }, [onReady]);
 
   return (
-    <div style={{ width: "100%", height: 920, overflow: "visible" }}>
+    <div style={{ width: "100%", height: 950, overflow: "visible" }}>
       <ReactECharts
         ref={chartRef}
         option={option}

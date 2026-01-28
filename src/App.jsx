@@ -1,3 +1,4 @@
+// C:\projects\yuanzhuo-admin\src\App.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import RadarSemiRadar from "./RadarSemiRadar";
@@ -99,15 +100,12 @@ function openSignedUrl(url) {
   window.open(u, "_blank", "noopener,noreferrer");
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 // ====================== report-api 地址（统一管理） ======================
 const REPORT_API_BASE = (import.meta.env.VITE_REPORT_API_BASE || "http://localhost:8080").replace(/\/$/, "");
 const REPORT_API_GENERATE_URL = `${REPORT_API_BASE}/report/generate`;
 const REPORT_API_STATUS_URL = `${REPORT_API_BASE}/report/status`;
-const REPORT_API_SIGNED_URL = `${REPORT_API_BASE}/report/signed-url`;
+// ✅ 你们线上后端没有 /report/signed-url；用 generate?mode=signed_url 获取下载链接
+const REPORT_API_GET_URL = `${REPORT_API_BASE}/report/generate?mode=signed_url`;
 
 // ====================== App ======================
 export default function App() {
@@ -379,7 +377,7 @@ export default function App() {
     try {
       data = text ? JSON.parse(text) : null;
     } catch {
-      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 400)}`);
+      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 600)}`);
     }
 
     if (!resp.ok || !data?.ok) {
@@ -401,7 +399,7 @@ export default function App() {
     try {
       data = text ? JSON.parse(text) : null;
     } catch {
-      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 400)}`);
+      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 600)}`);
     }
 
     if (!resp.ok || !data?.ok) {
@@ -410,56 +408,56 @@ export default function App() {
     return data;
   }
 
-  /**
-   * 轮询后端状态：你截图里就是在打 status?submission_id=...
-   * - status done 或者出现 pdf_path，都视为“已产出”，然后再去 /report/signed-url 拿下载链接
-   */
-  async function waitPdfReadyThenGetSignedUrl(submissionId, accessToken, timeoutMs = 120000) {
-    const started = Date.now();
-    let lastStatus = "";
-    let lastMsg = "";
+  // ✅ 通过 /report/generate?mode=signed_url 获取下载链接（你们线上后端就是这个）
+  async function fetchPdfSignedUrlByGenerate(submissionId, accessToken) {
+    const data = await postJson(REPORT_API_GET_URL, { submission_id: submissionId }, accessToken);
+    const url = data?.pdf?.url;
+    if (!url) throw new Error("后端未返回 pdf.url（generate?mode=signed_url）");
+    return url;
+  }
 
-    while (Date.now() - started < timeoutMs) {
-      const url = `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`;
-      const st = await getJson(url, accessToken);
+  // ✅ 轮询 /report/status，直到 done / 有 pdf_path，然后再去拿 signed_url
+  async function waitPdfReadyThenGetSignedUrl(submissionId, accessToken, opts = {}) {
+    const timeoutMs = Number(opts.timeoutMs ?? 180000); // 3分钟
+    const intervalMs = Number(opts.intervalMs ?? 1500);
+    const start = Date.now();
 
-      // 尽量兼容不同字段命名
-      const status = String(st?.status || st?.report?.status || "").toLowerCase();
-      const pdfPath = st?.pdf_path || st?.report?.pdf_path || st?.report?.pdfPath || null;
-
-      lastStatus = status || lastStatus;
-      lastMsg = st?.msg || st?.message || lastMsg;
-
-      if (status === "error" || status === "failed") {
-        throw new Error(`PDF 生成失败：${st?.error || st?.report?.error || st?.msg || ""}`.trim());
-      }
-
-      // ✅ 关键：只要 done 或者 pdf_path 有了，就去签名下载
-      if (status === "done" || !!pdfPath) {
-        const signed = await postJson(REPORT_API_SIGNED_URL, { submission_id: submissionId }, accessToken);
-        const u = signed?.pdf?.url;
-        if (u) return u;
-
-        // 极少数情况：storage 还没立刻可签名，等一下再试一次
-        await sleep(800);
-        const signed2 = await postJson(REPORT_API_SIGNED_URL, { submission_id: submissionId }, accessToken);
-        const u2 = signed2?.pdf?.url;
-        if (u2) return u2;
-
-        throw new Error("PDF 已生成，但未拿到 signed url（/report/signed-url 未返回 pdf.url）");
-      }
-
-      await sleep(1500);
+    // 先尝试直接拿一次（如果后端刚好已完成，会立刻返回 url）
+    try {
+      const direct = await fetchPdfSignedUrlByGenerate(submissionId, accessToken);
+      if (direct) return direct;
+    } catch {
+      // ignore：没拿到就继续轮询 status
     }
 
-    // 超时兜底：再尝试签一次（有时候 status 不回 done 但文件已写入）
-    try {
-      const signed = await postJson(REPORT_API_SIGNED_URL, { submission_id: submissionId }, accessToken);
-      const u = signed?.pdf?.url;
-      if (u) return u;
-    } catch {}
+    while (Date.now() - start < timeoutMs) {
+      // status endpoint：GET /report/status?submission_id=...
+      const u = `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`;
+      const st = await getJson(u, accessToken);
 
-    throw new Error(`等待下载链接超时：PDF 生成时间过长或 status 未回 done（lastStatus=${lastStatus || "-"} ${lastMsg ? `msg=${lastMsg}` : ""}）`);
+      // 兼容后端返回字段
+      const status = String(st?.status || st?.report?.status || "").toLowerCase();
+      const hasPdfPath = !!(st?.pdf?.path || st?.report?.pdf_path || st?.pdf_path);
+
+      if (status === "done" || hasPdfPath) {
+        // 已完成：再去 generate?mode=signed_url 取最终 url
+        const url = await fetchPdfSignedUrlByGenerate(submissionId, accessToken);
+        return url;
+      }
+
+      if (status === "error" || st?.error) {
+        throw new Error(st?.error || "后端生成失败（status=error）");
+      }
+
+      // 等待下一轮
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+
+    // 超时兜底：最后再尝试拿一次
+    const url = await fetchPdfSignedUrlByGenerate(submissionId, accessToken);
+    if (url) return url;
+
+    throw new Error("等待下载链接超时：PDF 生成时间过长或 status 未返回 url");
   }
 
   // ✅ 点击“生成PDF(含雷达图)”：启动隐藏雷达 job
@@ -486,7 +484,7 @@ export default function App() {
     setRadarJobReady((prev) => (prev ? prev : true));
   }, []);
 
-  // ✅ radarJob 流程：exportPngAsync → /report/generate?mode=signed_url → 若未返回url则轮询 status → /report/signed-url → open
+  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate → 轮询 status → openSignedUrl
   useEffect(() => {
     (async () => {
       if (!radarJob) return;
@@ -501,13 +499,14 @@ export default function App() {
         const radarPngDataUrl = await api.exportPngAsync({
           pixelRatio: 3,
           backgroundColor: "#ffffff",
-          timeoutMs: 12000,
+          timeoutMs: 10000,
         });
 
         const accessToken = await getAccessTokenOrThrow();
 
-        // 1) 优先让后端直接返回 signed_url（如果后端支持 mode=signed_url）
+        // 1) 触发生成（后端可能马上返回 url，也可能返回 processing）
         const data = await postJson(
+          // ✅ 这里直接用 mode=signed_url：如果后端能立刻给 url，直接打开；否则我们再轮询
           `${REPORT_API_GENERATE_URL}?mode=signed_url`,
           {
             submission_id: reportRow.submission_id,
@@ -517,19 +516,22 @@ export default function App() {
           accessToken
         );
 
-        // 2) 若已直接拿到 url：立刻打开
+        await fetchReports();
+
+        // 2) 如果后端已经给了 url：直接打开
         const directUrl = data?.pdf?.url;
         if (directUrl) {
-          await fetchReports();
           openSignedUrl(directUrl);
           alert("PDF 已生成 ✅");
           return;
         }
 
-        // 3) 否则：说明后端是异步（你截图就是这种），开始轮询 status，等到 done/pdf_path，再去 /report/signed-url 拿链接
-        const finalUrl = await waitPdfReadyThenGetSignedUrl(reportRow.submission_id, accessToken, 120000);
-        await fetchReports();
-        openSignedUrl(finalUrl);
+        // 3) 否则：轮询 status，直到完成后再拿 url
+        const url = await waitPdfReadyThenGetSignedUrl(reportRow.submission_id, accessToken, {
+          timeoutMs: 180000,
+          intervalMs: 1500,
+        });
+        openSignedUrl(url);
         alert("PDF 已生成 ✅");
       } catch (e) {
         alert("生成PDF失败：\n" + (e?.message || String(e)));
@@ -821,10 +823,8 @@ export default function App() {
                   reports.map((r) => {
                     const snap = r.snapshot || {};
                     const canPreviewRadar =
-                      Array.isArray(snap?.subscores) &&
-                      snap.subscores.length > 0 &&
-                      snap?.dimscores &&
-                      (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object");
+                      (Array.isArray(snap?.subscores) && snap.subscores.length > 0) &&
+                      (snap?.dimscores && (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object"));
 
                     return (
                       <div
@@ -872,7 +872,7 @@ export default function App() {
                               style={btnPrimary}
                               disabled={busyId === r.id}
                               onClick={() => startGeneratePdfWithRadar(r)}
-                              title="导出雷达PNG→后端嵌入PDF→存 Reports→最终自动下载"
+                              title="导出雷达PNG→后端嵌入PDF→存 Reports→自动打开下载链接"
                             >
                               {busyId === r.id ? "生成中…" : "生成PDF(含雷达图)"}
                             </button>

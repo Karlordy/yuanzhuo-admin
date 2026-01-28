@@ -334,7 +334,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           },
         },
 
-        // ② 分隔线
+        // ② 分隔线 (🟢 修改处：延长水平线)
         {
           type: "custom",
           coordinateSystem: "polar",
@@ -349,7 +349,12 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             const angDeg = DIM_BOUNDARY_ANGLES[params.dataIndex] ?? 0;
             const cx = coordSys.cx;
             const cy = coordSys.cy;
-            const r = coordSys.r * DIVIDER_LEN;
+
+            // 🟢 修改逻辑：如果是 0° 或 180°（水平线），则倍数设为 1.15，否则 1.0
+            const isHorizontal = angDeg === 0 || angDeg === 180;
+            const lenFactor = isHorizontal ? 1.15 : DIVIDER_LEN;
+
+            const r = coordSys.r * lenFactor;
 
             const a = (angDeg * Math.PI) / 180;
             const x = cx + -Math.cos(a) * r;

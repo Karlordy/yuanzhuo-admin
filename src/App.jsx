@@ -96,13 +96,13 @@ function openSignedUrl(url) {
     alert("没有拿到下载链接 url");
     return;
   }
-  window.open(u, "_blank", "noopener,noreferrer");
+  window.open(u, "_blank");
 }
 
 // ====================== report-api 地址（统一管理） ======================
 const REPORT_API_BASE = (import.meta.env.VITE_REPORT_API_BASE || "http://localhost:8080").replace(/\/$/, "");
 const REPORT_API_GENERATE_URL = `${REPORT_API_BASE}/report/generate`;
-const REPORT_API_SIGNED_URL = `${REPORT_API_BASE}/report/signed-url`;
+const REPORT_API_STATUS_URL = `${REPORT_API_BASE}/report/status`;
 
 // ====================== App ======================
 export default function App() {
@@ -144,14 +144,10 @@ export default function App() {
   // per-row action
   const [busyId, setBusyId] = useState(null);
 
-  // env（仅展示用）
+  // env
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
   const FN_URL = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/functions/v1/generate-report` : "";
-
-  // ✅ report-api 用的 API Key（前端打包可见：这是后台站点可接受；后面要更安全我们再升级）
-  const REPORT_API_KEY =
-    (import.meta.env.VITE_REPORT_API_KEY || "").trim() || String(window.REPORT_API_KEY || "").trim();
 
   // ============ auth ============
   useEffect(() => {
@@ -355,21 +351,20 @@ export default function App() {
     }
   }
 
-  // ============ report-api calls（改为 API Key） ============
-  function getApiKeyOrThrow() {
-    const k = String(REPORT_API_KEY || "").trim();
-    if (!k) throw new Error("缺少 REPORT_API_KEY：请在前端 .env 里配置 VITE_REPORT_API_KEY");
-    return k;
+  // ============ report-api calls ============
+  async function getAccessTokenOrThrow() {
+    const { data: sessData } = await supabase.auth.getSession();
+    const accessToken = sessData?.session?.access_token;
+    if (!accessToken) throw new Error("未登录或登录已过期，请重新登录");
+    return accessToken;
   }
 
-  async function postJson(url, body) {
-    const apiKey = getApiKeyOrThrow();
-
+  async function postJson(url, body, accessToken) {
     const resp = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(body || {}),
     });
@@ -388,17 +383,40 @@ export default function App() {
     return data;
   }
 
-  // ✅ 下载PDF：只走 /report/signed-url，然后 window.open(pdf.url)
-  async function downloadPdfByApi(reportRow) {
-    setBusyId(reportRow.id);
-    try {
-      const data = await postJson(REPORT_API_SIGNED_URL, { submission_id: reportRow.submission_id });
-      openSignedUrl(data?.pdf?.url);
-    } catch (e) {
-      alert("下载失败：\n" + (e?.message || String(e)));
-    } finally {
-      setBusyId(null);
+  // ✅ 轮询 /report/status，直到拿到 pdf.url 或超时
+  async function waitPdfUrlOrThrow({ submissionId, accessToken, timeoutMs = 90000, intervalMs = 1000 }) {
+    const start = Date.now();
+
+    while (Date.now() - start < timeoutMs) {
+      const resp = await fetch(
+        `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      const text = await resp.text().catch(() => "");
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(`轮询状态接口返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 400)}`);
+      }
+
+      const status = data?.report?.status || data?.status;
+      const url = data?.pdf?.url;
+
+      if (url && status === "done") return url;
+
+      if (status === "error" || status === "failed") {
+        throw new Error(data?.report?.error || data?.error || "PDF 生成失败（status=error）");
+      }
+
+      await new Promise((r) => setTimeout(r, intervalMs));
     }
+
+    throw new Error("等待下载链接超时：PDF 生成时间过长或 status 未返回 url");
   }
 
   // ✅ 点击“生成PDF(含雷达图)”：启动隐藏雷达 job
@@ -425,7 +443,7 @@ export default function App() {
     setRadarJobReady((prev) => (prev ? prev : true));
   }, []);
 
-  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate → openSignedUrl
+  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate?mode=signed_url → 轮询 /report/status → openSignedUrl
   useEffect(() => {
     (async () => {
       if (!radarJob) return;
@@ -443,20 +461,35 @@ export default function App() {
           timeoutMs: 8000,
         });
 
-        const data = await postJson(REPORT_API_GENERATE_URL, {
-          submission_id: reportRow.submission_id,
-          radar_png_data_url: radarPngDataUrl,
-          display_file_name: reportRow.file_name || null,
-        });
+        const accessToken = await getAccessTokenOrThrow();
 
+        // 1) 触发后台生成（会返回 processing，不直接返回 url）
+        await postJson(
+          `${REPORT_API_GENERATE_URL}?mode=signed_url`,
+          {
+            submission_id: reportRow.submission_id,
+            radar_png_data_url: radarPngDataUrl,
+            display_file_name: reportRow.file_name || null,
+          },
+          accessToken
+        );
+
+        // 2) 刷新一次列表
         await fetchReports();
 
-        if (data?.pdf?.url) {
-          openSignedUrl(data.pdf.url);
-          alert("PDF 已生成 ✅");
-        } else {
-          alert("PDF 已生成 ✅（但未返回下载URL）");
-        }
+        // 3) 轮询拿 url（关键）
+        const pdfUrl = await waitPdfUrlOrThrow({
+          submissionId: reportRow.submission_id,
+          accessToken,
+          timeoutMs: 90000,
+          intervalMs: 1000,
+        });
+
+        openSignedUrl(pdfUrl);
+        alert("PDF 已生成 ✅（已打开下载链接）");
+
+        // 4) 再刷新一次（把 done / pdf_path 显示出来）
+        await fetchReports();
       } catch (e) {
         alert("生成PDF失败：\n" + (e?.message || String(e)));
       } finally {
@@ -555,8 +588,7 @@ export default function App() {
             <div style={{ marginTop: 10, color: "#64748b", fontSize: 11, whiteSpace: "pre-wrap" }}>
               ENV:{"\n"}VITE_SUPABASE_URL={SUPABASE_URL ? "OK" : "MISSING"}{"\n"}VITE_SUPABASE_ANON_KEY=
               {SUPABASE_ANON_KEY ? "OK" : "MISSING"}
-              {"\n"}VITE_REPORT_API_BASE={REPORT_API_BASE}
-              {"\n"}VITE_REPORT_API_KEY={REPORT_API_KEY ? "OK" : "MISSING"}
+              {"\n"}REPORT_API_BASE={REPORT_API_BASE}
               {"\n"}FN_URL={FN_URL || "(missing)"}
             </div>
           </form>
@@ -611,8 +643,7 @@ export default function App() {
               登录：{session.user.email} ｜ 角色：{adminRow?.role || "-"}
             </div>
             <div style={{ marginTop: 6, color: "#64748b", fontSize: 11, whiteSpace: "pre-wrap" }}>
-              VITE_REPORT_API_BASE: {REPORT_API_BASE}
-              {"\n"}VITE_REPORT_API_KEY: {REPORT_API_KEY ? "OK" : "MISSING"}
+              REPORT_API_BASE: {REPORT_API_BASE}
               {"\n"}FN_URL: {FN_URL || "(missing VITE_SUPABASE_URL)"}
             </div>
           </div>
@@ -749,10 +780,8 @@ export default function App() {
                   reports.map((r) => {
                     const snap = r.snapshot || {};
                     const canPreviewRadar =
-                      Array.isArray(snap?.subscores) &&
-                      snap.subscores.length > 0 &&
-                      snap?.dimscores &&
-                      (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object");
+                      (Array.isArray(snap?.subscores) && snap.subscores.length > 0) &&
+                      (snap?.dimscores && (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object"));
 
                     return (
                       <div
@@ -800,18 +829,9 @@ export default function App() {
                               style={btnPrimary}
                               disabled={busyId === r.id}
                               onClick={() => startGeneratePdfWithRadar(r)}
-                              title="导出雷达PNG→后端嵌入PDF→存 Reports→立即下载"
+                              title="导出雷达PNG→后端嵌入PDF→后台生成→轮询拿下载链接→自动打开"
                             >
                               {busyId === r.id ? "生成中…" : "生成PDF(含雷达图)"}
-                            </button>
-
-                            <button
-                              style={btn}
-                              disabled={busyId === r.id}
-                              onClick={() => downloadPdfByApi(r)}
-                              title="从后端拿 signed url 并下载（不依赖 Storage policy）"
-                            >
-                              {busyId === r.id ? "处理中…" : "下载PDF"}
                             </button>
                           </div>
                         </div>

@@ -109,11 +109,9 @@ const REPORT_API_GET_URL = `${REPORT_API_BASE}/report/generate?mode=signed_url`;
 // ====================== 后端返回兼容解析 ======================
 function extractPdfUrl(data) {
   if (!data) return "";
-  // 常见：{ pdf: { url } }
   const u1 = data?.pdf?.url;
   if (u1) return String(u1);
 
-  // 兼容：{ url } / { signed_url } / { pdf_url } / { download_url } 等
   const candidates = [
     data?.url,
     data?.signed_url,
@@ -129,7 +127,6 @@ function extractPdfUrl(data) {
     if (u) return String(u);
   }
 
-  // 兼容：{ pdf: { signed_url } } 之类
   const u2 = data?.pdf?.signed_url || data?.pdf?.signedUrl || data?.pdf?.download_url || data?.pdf?.downloadUrl;
   if (u2) return String(u2);
 
@@ -460,76 +457,60 @@ export default function App() {
     return data;
   }
 
-  // ✅ 通过 /report/generate?mode=signed_url 尝试拿 url（拿不到不报错，返回空字符串）
+  // ✅ 通过 /report/generate?mode=signed_url 尝试拿 url（拿不到返回空字符串，不抛错）
   async function tryGetPdfSignedUrl(submissionId, accessToken) {
-    const data = await postJson(REPORT_API_GET_URL, { submission_id: submissionId }, accessToken);
-    const url = extractPdfUrl(data);
-    return url || "";
+    try {
+      const data = await postJson(REPORT_API_GET_URL, { submission_id: submissionId }, accessToken);
+      const url = extractPdfUrl(data);
+      return url || "";
+    } catch {
+      return "";
+    }
   }
 
-  // ✅ 轮询 /report/status，直到 done / 有 pdf_path，然后再去尝试拿 signed url
-  async function waitPdfReadyThenGetSignedUrl(submissionId, accessToken, opts = {}) {
+  /**
+   * ✅ 核心修复：永远“持续尝试拿 pdf.url”
+   * - 每轮：先 tryGetPdfSignedUrl（如果拿到直接返回）
+   * - 再 GET /report/status（用于判断 error / 给用户信息）
+   * - 即使 status=processing 但 pdf_path 已有，也继续等（你截图就是这种）
+   */
+  async function waitUntilHaveSignedUrl(submissionId, accessToken, opts = {}) {
     const timeoutMs = Number(opts.timeoutMs ?? 240000); // 4分钟
     const intervalMs = Number(opts.intervalMs ?? 1500);
     const start = Date.now();
 
-    // 先试一次（可能直接有）
-    try {
-      const first = await tryGetPdfSignedUrl(submissionId, accessToken);
-      if (first) return first;
-    } catch {
-      // ignore
-    }
-
     let lastStatus = "";
     let lastPdfPath = "";
+
     while (Date.now() - start < timeoutMs) {
-      const u = `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`;
-      const st = await getJson(u, accessToken);
+      // 1) 优先尝试直接拿 url
+      const u = await tryGetPdfSignedUrl(submissionId, accessToken);
+      if (u) return u;
+
+      // 2) 看一下 status（用于 error 快速失败 + 记录 pdf_path）
+      const stUrl = `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`;
+      const st = await getJson(stUrl, accessToken);
 
       lastStatus = extractStatusText(st);
       lastPdfPath = extractPdfPathFromStatus(st);
-
-      // 完成判定：done / completed / success / 或者已经有 pdf_path
-      const done =
-        lastStatus === "done" ||
-        lastStatus === "completed" ||
-        lastStatus === "success" ||
-        lastStatus === "succeeded" ||
-        !!lastPdfPath;
 
       if (lastStatus === "error" || st?.error) {
         throw new Error(st?.error || "后端生成失败（status=error）");
       }
 
-      if (done) {
-        // 完成后再试拿 url
-        const url = await tryGetPdfSignedUrl(submissionId, accessToken);
-        if (url) return url;
-
-        // 有些后端把 url 放在 status 里
-        const url2 = extractPdfUrl(st?.pdf) || extractPdfUrl(st) || extractPdfUrl(st?.report) || "";
-        if (url2) return url2;
-
-        // 仍然没有：把关键线索带回去，方便你定位后端字段
-        throw new Error(
-          `PDF 已生成但未返回下载URL。\n` +
-            `status=${lastStatus || "(empty)"}\n` +
-            `pdf_path=${lastPdfPath || "(empty)"}\n` +
-            `请把 /report/status 的响应JSON发我，我来适配字段。`
-        );
-      }
-
+      // 3) 等一会继续（重点：不因为 pdf_path 有了就停止）
       await new Promise((r) => setTimeout(r, intervalMs));
     }
 
-    // 超时：最后再试一次
+    // 超时后再试一次
     const lastTry = await tryGetPdfSignedUrl(submissionId, accessToken);
     if (lastTry) return lastTry;
 
     throw new Error(
-      `等待下载链接超时：PDF 生成时间过长。\n` +
-        `请打开 Network → 找到最后一次 GET /report/status 的响应JSON 发我。`
+      `等待下载URL超时。\n` +
+        `status=${lastStatus || "(empty)"}\n` +
+        `pdf_path=${lastPdfPath || "(empty)"}\n` +
+        `请把 Network 里 GET /report/status 的响应 JSON 复制给我（Response 全部文本）。`
     );
   }
 
@@ -557,7 +538,7 @@ export default function App() {
     setRadarJobReady((prev) => (prev ? prev : true));
   }, []);
 
-  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate → 轮询 status → openSignedUrl
+  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate → 轮询直到拿到 pdf.url → open
   useEffect(() => {
     (async () => {
       if (!radarJob) return;
@@ -590,7 +571,7 @@ export default function App() {
 
         await fetchReports();
 
-        // 2) 如果后端当场给了 url：直接打开
+        // 2) 如果当场给了 url：直接打开
         const directUrl = extractPdfUrl(data);
         if (directUrl) {
           openSignedUrl(directUrl);
@@ -598,11 +579,12 @@ export default function App() {
           return;
         }
 
-        // 3) 否则：轮询 status → done 后再取 url
-        const url = await waitPdfReadyThenGetSignedUrl(reportRow.submission_id, accessToken, {
+        // 3) 否则：持续轮询，直到拿到 pdf.url（适配你截图：pdf_path 有但 status 还 processing）
+        const url = await waitUntilHaveSignedUrl(reportRow.submission_id, accessToken, {
           timeoutMs: 240000,
           intervalMs: 1500,
         });
+
         openSignedUrl(url);
         alert("PDF 已生成 ✅");
       } catch (e) {
@@ -946,7 +928,7 @@ export default function App() {
                               style={btnPrimary}
                               disabled={busyId === r.id}
                               onClick={() => startGeneratePdfWithRadar(r)}
-                              title="导出雷达PNG→后端嵌入PDF→轮询状态→自动打开下载链接"
+                              title="导出雷达PNG→后端嵌入PDF→持续轮询直到拿到下载URL→自动打开"
                             >
                               {busyId === r.id ? "生成中…" : "生成PDF(含雷达图)"}
                             </button>

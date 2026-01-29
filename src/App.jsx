@@ -1,4 +1,3 @@
-// C:\projects\yuanzhuo-admin\src\App.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import RadarSemiRadar from "./RadarSemiRadar";
@@ -101,60 +100,9 @@ function openSignedUrl(url) {
 }
 
 // ====================== report-api 地址（统一管理） ======================
-const REPORT_API_BASE = (import.meta.env.VITE_REPORT_API_BASE || "http://localhost:8080").replace(/\/$/, "");
+const REPORT_API_BASE = (import.meta.env.VITE_REPORT_API_BASE || "http://localhost:3000").replace(/\/$/, "");
 const REPORT_API_GENERATE_URL = `${REPORT_API_BASE}/report/generate`;
 const REPORT_API_STATUS_URL = `${REPORT_API_BASE}/report/status`;
-const REPORT_API_GET_URL = `${REPORT_API_BASE}/report/generate?mode=signed_url`;
-
-// ====================== 后端返回兼容解析 ======================
-function extractPdfUrl(data) {
-  if (!data) return "";
-  const u1 = data?.pdf?.url;
-  if (u1) return String(u1);
-
-  const candidates = [
-    data?.url,
-    data?.signed_url,
-    data?.signedUrl,
-    data?.pdf_url,
-    data?.pdfUrl,
-    data?.download_url,
-    data?.downloadUrl,
-    data?.result?.pdf?.url,
-    data?.data?.pdf?.url,
-  ];
-  for (const u of candidates) {
-    if (u) return String(u);
-  }
-
-  const u2 = data?.pdf?.signed_url || data?.pdf?.signedUrl || data?.pdf?.download_url || data?.pdf?.downloadUrl;
-  if (u2) return String(u2);
-
-  return "";
-}
-
-function extractPdfPathFromStatus(st) {
-  return (
-    st?.pdf?.path ||
-    st?.pdf_path ||
-    st?.report?.pdf_path ||
-    st?.report?.pdfPath ||
-    st?.data?.report?.pdf_path ||
-    st?.data?.pdf_path ||
-    ""
-  );
-}
-
-function extractStatusText(st) {
-  const s =
-    st?.status ||
-    st?.report?.status ||
-    st?.data?.status ||
-    st?.data?.report?.status ||
-    st?.report_status ||
-    "";
-  return String(s || "").toLowerCase();
-}
 
 // ====================== App ======================
 export default function App() {
@@ -196,14 +144,6 @@ export default function App() {
   // per-row action
   const [busyId, setBusyId] = useState(null);
 
-  // ✅ 用于“取消一切后台轮询”的 token（关键修复）
-  const jobTokenRef = useRef(0);
-  const newJobToken = () => {
-    jobTokenRef.current += 1;
-    return jobTokenRef.current;
-  };
-  const isJobTokenCancelled = (t) => jobTokenRef.current !== t;
-
   // env
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
@@ -213,14 +153,8 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session || null));
 
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-
-      // ✅ 关键：TOKEN_REFRESHED 不要重置 UI，否则你会“自动跳回校验权限”
-      if (event === "TOKEN_REFRESHED") return;
-
-      // 其它事件（SIGNED_IN / SIGNED_OUT / USER_UPDATED 等）才重置
-      jobTokenRef.current += 1; // ✅ 取消所有正在进行的轮询/任务
       setAdminRow(undefined);
       setLoginErr("");
       setSubs([]);
@@ -343,7 +277,6 @@ export default function App() {
   }
 
   async function signOut() {
-    jobTokenRef.current += 1; // ✅ 取消后台轮询
     await supabase.auth.signOut();
     setSession(null);
     setAdminRow(undefined);
@@ -441,7 +374,7 @@ export default function App() {
     try {
       data = text ? JSON.parse(text) : null;
     } catch {
-      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 800)}`);
+      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 400)}`);
     }
 
     if (!resp.ok || !data?.ok) {
@@ -463,7 +396,7 @@ export default function App() {
     try {
       data = text ? JSON.parse(text) : null;
     } catch {
-      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 800)}`);
+      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 400)}`);
     }
 
     if (!resp.ok || !data?.ok) {
@@ -472,63 +405,35 @@ export default function App() {
     return data;
   }
 
-  // ✅ 通过 /report/generate?mode=signed_url 尝试拿 url（拿不到返回空字符串，不抛错）
-  async function tryGetPdfSignedUrl(submissionId, accessToken) {
-    try {
-      const data = await postJson(REPORT_API_GET_URL, { submission_id: submissionId }, accessToken);
-      const url = extractPdfUrl(data);
-      return url || "";
-    } catch {
-      return "";
-    }
-  }
+  // ✅ 轮询：直到 /report/status 返回 pdf.url（done）或 error/超时
+  async function pollReportUntilReady({ submissionId, accessToken, timeoutMs = 120000, intervalMs = 1200 }) {
+    const t0 = Date.now();
+    while (true) {
+      const url = `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`;
+      const data = await getJson(url, accessToken);
 
-  /**
-   * ✅ 核心：持续尝试拿 pdf.url（带取消 token）
-   */
-  async function waitUntilHaveSignedUrl(submissionId, accessToken, jobToken, opts = {}) {
-    const timeoutMs = Number(opts.timeoutMs ?? 240000); // 4分钟
-    const intervalMs = Number(opts.intervalMs ?? 1500);
-    const start = Date.now();
+      const r = data?.report;
+      const pdfUrl = data?.pdf?.url;
 
-    let lastStatus = "";
-    let lastPdfPath = "";
+      // done 且有 url
+      if (r?.status === "done" && pdfUrl) return { report: r, pdfUrl };
 
-    while (Date.now() - start < timeoutMs) {
-      if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
-
-      // 1) 优先尝试直接拿 url
-      const u = await tryGetPdfSignedUrl(submissionId, accessToken);
-      if (u) return u;
-
-      if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
-
-      // 2) 看一下 status（用于 error 快速失败 + 记录 pdf_path）
-      const stUrl = `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`;
-      const st = await getJson(stUrl, accessToken);
-
-      lastStatus = extractStatusText(st);
-      lastPdfPath = extractPdfPathFromStatus(st);
-
-      if (lastStatus === "error" || st?.error) {
-        throw new Error(st?.error || "后端生成失败（status=error）");
+      // error
+      if (r?.status === "error") {
+        throw new Error(`生成PDF失败：${r?.error || "unknown error"}`);
       }
 
-      // 3) 等一会继续（重点：不因为 pdf_path 有了就停止）
+      // 超时
+      if (Date.now() - t0 > timeoutMs) {
+        const status = r?.status || "unknown";
+        const pdfPath = r?.pdf_path || "";
+        throw new Error(
+          `PDF 已开始生成但尚未返回下载URL。\nstatus=${status}\npdf_path=${pdfPath}\n\n你可以稍后刷新页面再点“生成PDF(含雷达图)”重试。`
+        );
+      }
+
       await new Promise((r) => setTimeout(r, intervalMs));
     }
-
-    // 超时后再试一次
-    if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
-    const lastTry = await tryGetPdfSignedUrl(submissionId, accessToken);
-    if (lastTry) return lastTry;
-
-    throw new Error(
-      `等待下载URL超时。\n` +
-        `status=${lastStatus || "(empty)"}\n` +
-        `pdf_path=${lastPdfPath || "(empty)"}\n` +
-        `请把 Network 里 GET /report/status 的响应 JSON 复制给我（Response 全部文本）。`
-    );
   }
 
   // ✅ 点击“生成PDF(含雷达图)”：启动隐藏雷达 job
@@ -538,20 +443,15 @@ export default function App() {
       alert("该报告 snapshot 里没有测评数据，无法生成雷达图");
       return;
     }
-    if (!adminRow || adminRow.blocked) {
-      alert("未授权，不能生成报告");
-      return;
-    }
 
     const { subMap, dimMap } = buildScoreMapsFromSnapshot(snap);
     const title = `${snap.name || ""}-${snap.company || ""}`.trim() || "雷达图";
 
-    const jobToken = newJobToken(); // ✅ 本次任务 token
     setBusyId(reportRow.id);
 
     radarJobApiRef.current = null;
     setRadarJobReady(false);
-    setRadarJob({ jobToken, reportRow, subMap, dimMap, title });
+    setRadarJob({ reportRow, subMap, dimMap, title });
   }
 
   // ✅ 隐藏图 onReady：稳定引用 + ref 保存 api
@@ -560,17 +460,15 @@ export default function App() {
     setRadarJobReady((prev) => (prev ? prev : true));
   }, []);
 
-  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 → 轮询到 url → open（带取消 token）
+  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate(异步) → 轮询 /report/status → openSignedUrl
   useEffect(() => {
     (async () => {
       if (!radarJob) return;
       if (!radarJobReady) return;
 
-      const { reportRow, jobToken } = radarJob;
+      const reportRow = radarJob.reportRow;
 
       try {
-        if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
-
         const api = radarJobApiRef.current;
         if (!api?.exportPngAsync) throw new Error("Radar 图导出能力未就绪（exportPngAsync 缺失）");
 
@@ -580,54 +478,42 @@ export default function App() {
           timeoutMs: 12000,
         });
 
-        if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
-
         const accessToken = await getAccessTokenOrThrow();
 
-        // 1) 触发生成
-        const data = await postJson(
-          `${REPORT_API_GENERATE_URL}?mode=signed_url`,
+        // 1) 触发后端异步生成（不要指望立刻返回 pdf.url）
+        await postJson(
+          REPORT_API_GENERATE_URL,
           {
             submission_id: reportRow.submission_id,
             radar_png_data_url: radarPngDataUrl,
             display_file_name: reportRow.file_name || null,
+            // 不传 mode：默认 async，避免 Cloudflare 100s 超时
           },
           accessToken
         );
 
-        if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
-
-        await fetchReports();
-
-        // 2) 如果当场给了 url：直接打开
-        const directUrl = extractPdfUrl(data);
-        if (directUrl) {
-          openSignedUrl(directUrl);
-          alert("PDF 已生成 ✅");
-          return;
-        }
-
-        // 3) 否则持续轮询
-        const url = await waitUntilHaveSignedUrl(reportRow.submission_id, accessToken, jobToken, {
-          timeoutMs: 240000,
-          intervalMs: 1500,
+        // 2) 轮询直到 ready
+        const out = await pollReportUntilReady({
+          submissionId: reportRow.submission_id,
+          accessToken,
+          timeoutMs: 120000,
+          intervalMs: 1200,
         });
 
-        if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
-        openSignedUrl(url);
+        // 3) 打开 signed url
+        openSignedUrl(out.pdfUrl);
+
+        // 4) 刷新列表
+        await fetchReports();
+
         alert("PDF 已生成 ✅");
       } catch (e) {
-        // ✅ 如果是取消，不弹大红错误
-        if (String(e?.message || "").includes("已取消")) return;
         alert("生成PDF失败：\n" + (e?.message || String(e)));
       } finally {
-        // 只有当前任务没被新任务替代时才清理（避免并发导致 UI 乱）
-        if (radarJob && radarJob.jobToken === jobToken) {
-          radarJobApiRef.current = null;
-          setRadarJob(null);
-          setRadarJobReady(false);
-          setBusyId(null);
-        }
+        radarJobApiRef.current = null;
+        setRadarJob(null);
+        setRadarJobReady(false);
+        setBusyId(null);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -668,9 +554,7 @@ export default function App() {
       <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#fff" }}>
         <div style={{ ...card, width: 460, maxWidth: "92vw" }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>圆桌经营会｜后台登录</h1>
-          <p style={{ marginTop: 8, marginBottom: 14, color: "#64748b", fontSize: 12 }}>
-            请输入管理员账号（Supabase Auth 用户）
-          </p>
+          <p style={{ marginTop: 8, marginBottom: 14, color: "#64748b", fontSize: 12 }}>请输入管理员账号（Supabase Auth 用户）</p>
 
           <form onSubmit={signIn} style={{ display: "grid", gap: 10 }}>
             <label>
@@ -706,19 +590,15 @@ export default function App() {
               />
             </label>
 
-            {loginErr ? (
-              <div style={{ color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>{loginErr}</div>
-            ) : (
-              <div style={{ minHeight: 16 }} />
-            )}
+            {loginErr ? <div style={{ color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>{loginErr}</div> : <div style={{ minHeight: 16 }} />}
 
             <button type="submit" style={{ ...btnPrimary, width: "100%", marginTop: 4 }}>
               登录
             </button>
 
             <div style={{ marginTop: 10, color: "#64748b", fontSize: 11, whiteSpace: "pre-wrap" }}>
-              ENV:{"\n"}VITE_SUPABASE_URL={SUPABASE_URL ? "OK" : "MISSING"}{"\n"}VITE_SUPABASE_ANON_KEY=
-              {SUPABASE_ANON_KEY ? "OK" : "MISSING"}
+              ENV:{"\n"}VITE_SUPABASE_URL={SUPABASE_URL ? "OK" : "MISSING"}
+              {"\n"}VITE_SUPABASE_ANON_KEY={SUPABASE_ANON_KEY ? "OK" : "MISSING"}
               {"\n"}REPORT_API_BASE={REPORT_API_BASE}
               {"\n"}FN_URL={FN_URL || "(missing)"}
             </div>
@@ -750,11 +630,7 @@ export default function App() {
             该账号不在 admin_users 授权名单中，或已停用。
           </p>
 
-          {adminRow.message ? (
-            <div style={{ marginTop: 10, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>
-              {adminRow.message}
-            </div>
-          ) : null}
+          {adminRow.message ? <div style={{ marginTop: 10, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>{adminRow.message}</div> : null}
 
           <button onClick={signOut} style={{ ...btn, marginTop: 12 }}>
             退出登录
@@ -825,9 +701,7 @@ export default function App() {
             {loadingSubs ? (
               <div style={{ marginTop: 12, color: "#64748b", fontSize: 12 }}>加载中…</div>
             ) : subsErr ? (
-              <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>
-                读取 submissions 失败：{subsErr}
-              </div>
+              <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>读取 submissions 失败：{subsErr}</div>
             ) : (
               <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
                 {filteredSubs.length === 0 ? (
@@ -837,31 +711,17 @@ export default function App() {
                     const rep = reportBySubmissionId.get(s.id);
                     const hasReport = !!rep;
                     return (
-                      <div
-                        key={s.id}
-                        style={{
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 14,
-                          padding: 12,
-                          background: "#fff",
-                        }}
-                      >
+                      <div key={s.id} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                           <div style={{ fontWeight: 800 }}>
                             {s.name || "-"} ｜ {s.company || "-"}
-                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>
-                              {s.created_at ? new Date(s.created_at).toLocaleString() : ""}
-                            </span>
+                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</span>
                           </div>
 
                           {hasReport ? (
                             <span style={{ color: "#64748b", fontSize: 12 }}>已有报告：{rep.status}</span>
                           ) : (
-                            <button
-                              style={btnPrimary}
-                              disabled={busyId === s.id}
-                              onClick={() => createReportForSubmission(s)}
-                            >
+                            <button style={btnPrimary} disabled={busyId === s.id} onClick={() => createReportForSubmission(s)}>
                               {busyId === s.id ? "创建中…" : "生成报告记录"}
                             </button>
                           )}
@@ -900,9 +760,7 @@ export default function App() {
             </div>
 
             {reportsErr ? (
-              <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>
-                读取 reports 失败：{reportsErr}
-              </div>
+              <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>读取 reports 失败：{reportsErr}</div>
             ) : (
               <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
                 {reports.length === 0 ? (
@@ -911,27 +769,15 @@ export default function App() {
                   reports.map((r) => {
                     const snap = r.snapshot || {};
                     const canPreviewRadar =
-                      Array.isArray(snap?.subscores) &&
-                      snap.subscores.length > 0 &&
-                      snap?.dimscores &&
-                      (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object");
+                      (Array.isArray(snap?.subscores) && snap.subscores.length > 0) &&
+                      (snap?.dimscores && (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object"));
 
                     return (
-                      <div
-                        key={r.id}
-                        style={{
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 14,
-                          padding: 12,
-                          background: "#fff",
-                        }}
-                      >
+                      <div key={r.id} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                           <div style={{ fontWeight: 800 }}>
                             {(snap.name || r.name || "-") + " ｜ " + (snap.company || r.company || "-")}
-                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>
-                              {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
-                            </span>
+                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>{r.created_at ? new Date(r.created_at).toLocaleString() : ""}</span>
                           </div>
 
                           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -962,7 +808,7 @@ export default function App() {
                               style={btnPrimary}
                               disabled={busyId === r.id}
                               onClick={() => startGeneratePdfWithRadar(r)}
-                              title="导出雷达PNG→后端嵌入PDF→持续轮询直到拿到下载URL→自动打开"
+                              title="导出雷达PNG→后端异步生成PDF→轮询状态→自动打开下载链接"
                             >
                               {busyId === r.id ? "生成中…" : "生成PDF(含雷达图)"}
                             </button>

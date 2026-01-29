@@ -196,6 +196,14 @@ export default function App() {
   // per-row action
   const [busyId, setBusyId] = useState(null);
 
+  // ✅ 用于“取消一切后台轮询”的 token（关键修复）
+  const jobTokenRef = useRef(0);
+  const newJobToken = () => {
+    jobTokenRef.current += 1;
+    return jobTokenRef.current;
+  };
+  const isJobTokenCancelled = (t) => jobTokenRef.current !== t;
+
   // env
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
@@ -205,8 +213,14 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session || null));
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+
+      // ✅ 关键：TOKEN_REFRESHED 不要重置 UI，否则你会“自动跳回校验权限”
+      if (event === "TOKEN_REFRESHED") return;
+
+      // 其它事件（SIGNED_IN / SIGNED_OUT / USER_UPDATED 等）才重置
+      jobTokenRef.current += 1; // ✅ 取消所有正在进行的轮询/任务
       setAdminRow(undefined);
       setLoginErr("");
       setSubs([]);
@@ -329,6 +343,7 @@ export default function App() {
   }
 
   async function signOut() {
+    jobTokenRef.current += 1; // ✅ 取消后台轮询
     await supabase.auth.signOut();
     setSession(null);
     setAdminRow(undefined);
@@ -469,12 +484,9 @@ export default function App() {
   }
 
   /**
-   * ✅ 核心修复：永远“持续尝试拿 pdf.url”
-   * - 每轮：先 tryGetPdfSignedUrl（如果拿到直接返回）
-   * - 再 GET /report/status（用于判断 error / 给用户信息）
-   * - 即使 status=processing 但 pdf_path 已有，也继续等（你截图就是这种）
+   * ✅ 核心：持续尝试拿 pdf.url（带取消 token）
    */
-  async function waitUntilHaveSignedUrl(submissionId, accessToken, opts = {}) {
+  async function waitUntilHaveSignedUrl(submissionId, accessToken, jobToken, opts = {}) {
     const timeoutMs = Number(opts.timeoutMs ?? 240000); // 4分钟
     const intervalMs = Number(opts.intervalMs ?? 1500);
     const start = Date.now();
@@ -483,9 +495,13 @@ export default function App() {
     let lastPdfPath = "";
 
     while (Date.now() - start < timeoutMs) {
+      if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
+
       // 1) 优先尝试直接拿 url
       const u = await tryGetPdfSignedUrl(submissionId, accessToken);
       if (u) return u;
+
+      if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
 
       // 2) 看一下 status（用于 error 快速失败 + 记录 pdf_path）
       const stUrl = `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`;
@@ -503,6 +519,7 @@ export default function App() {
     }
 
     // 超时后再试一次
+    if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
     const lastTry = await tryGetPdfSignedUrl(submissionId, accessToken);
     if (lastTry) return lastTry;
 
@@ -521,15 +538,20 @@ export default function App() {
       alert("该报告 snapshot 里没有测评数据，无法生成雷达图");
       return;
     }
+    if (!adminRow || adminRow.blocked) {
+      alert("未授权，不能生成报告");
+      return;
+    }
 
     const { subMap, dimMap } = buildScoreMapsFromSnapshot(snap);
     const title = `${snap.name || ""}-${snap.company || ""}`.trim() || "雷达图";
 
+    const jobToken = newJobToken(); // ✅ 本次任务 token
     setBusyId(reportRow.id);
 
     radarJobApiRef.current = null;
     setRadarJobReady(false);
-    setRadarJob({ reportRow, subMap, dimMap, title });
+    setRadarJob({ jobToken, reportRow, subMap, dimMap, title });
   }
 
   // ✅ 隐藏图 onReady：稳定引用 + ref 保存 api
@@ -538,15 +560,17 @@ export default function App() {
     setRadarJobReady((prev) => (prev ? prev : true));
   }, []);
 
-  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate → 轮询直到拿到 pdf.url → open
+  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 → 轮询到 url → open（带取消 token）
   useEffect(() => {
     (async () => {
       if (!radarJob) return;
       if (!radarJobReady) return;
 
-      const reportRow = radarJob.reportRow;
+      const { reportRow, jobToken } = radarJob;
 
       try {
+        if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
+
         const api = radarJobApiRef.current;
         if (!api?.exportPngAsync) throw new Error("Radar 图导出能力未就绪（exportPngAsync 缺失）");
 
@@ -556,9 +580,11 @@ export default function App() {
           timeoutMs: 12000,
         });
 
+        if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
+
         const accessToken = await getAccessTokenOrThrow();
 
-        // 1) 触发生成（你们后端会先返回 processing）
+        // 1) 触发生成
         const data = await postJson(
           `${REPORT_API_GENERATE_URL}?mode=signed_url`,
           {
@@ -568,6 +594,8 @@ export default function App() {
           },
           accessToken
         );
+
+        if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
 
         await fetchReports();
 
@@ -579,21 +607,27 @@ export default function App() {
           return;
         }
 
-        // 3) 否则：持续轮询，直到拿到 pdf.url（适配你截图：pdf_path 有但 status 还 processing）
-        const url = await waitUntilHaveSignedUrl(reportRow.submission_id, accessToken, {
+        // 3) 否则持续轮询
+        const url = await waitUntilHaveSignedUrl(reportRow.submission_id, accessToken, jobToken, {
           timeoutMs: 240000,
           intervalMs: 1500,
         });
 
+        if (isJobTokenCancelled(jobToken)) throw new Error("已取消任务");
         openSignedUrl(url);
         alert("PDF 已生成 ✅");
       } catch (e) {
+        // ✅ 如果是取消，不弹大红错误
+        if (String(e?.message || "").includes("已取消")) return;
         alert("生成PDF失败：\n" + (e?.message || String(e)));
       } finally {
-        radarJobApiRef.current = null;
-        setRadarJob(null);
-        setRadarJobReady(false);
-        setBusyId(null);
+        // 只有当前任务没被新任务替代时才清理（避免并发导致 UI 乱）
+        if (radarJob && radarJob.jobToken === jobToken) {
+          radarJobApiRef.current = null;
+          setRadarJob(null);
+          setRadarJobReady(false);
+          setBusyId(null);
+        }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

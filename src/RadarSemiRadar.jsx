@@ -1,4 +1,11 @@
-import React, { useEffect, useMemo, useRef } from "react";
+// src/RadarSemiRadar.jsx
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import ReactECharts from "echarts-for-react";
 
 /** ---------------- 7维 / 21子项（上4能力=12项；下3限制=9项） ---------------- */
@@ -114,30 +121,30 @@ function bottomMax3Names(items) {
 
 /** 子项微调 */
 const SUB_NUDGE = {
-  使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 0, dxScore: 0, dyScore: 0 },
+  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 3, dxScore: 0, dyScore: 0 },
   取得成果: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  系统思考: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  平衡: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  持续产出: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  反思自省: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  学习者: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  沉着: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  系统思考: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  平衡: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  持续产出: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  反思自省: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  学习者: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  沉着: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   关爱: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  培育: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  团队合作: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  培育: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: -3, dxScore: 0, dyScore: 0 },
+  团队合作: { da: 0, drText: 0, drScore: 0, dxText: -9, dyText: 0, dxScore: 0, dyScore: 0 },
 
-  取悦: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  取悦: { da: 0, drText: 0, drScore: 0, dxText: -9, dyText: 0, dxScore: 0, dyScore: 0 },
   被动: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   保守: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  傲慢: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  傲慢: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
-  距离感: { da: 0, drText: 0, drScore: 0, dxText: 15, dyText: 0, dxScore: 0, dyScore: 0 },
+  距离感: { da: 0, drText: 0, drScore: 0, dxText: 35, dyText: 0, dxScore: 32, dyScore: 0 },
   挑剔: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
 
   完美: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
   专制: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
-  工作狂: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  工作狂: { da: 0, drText: 0, drScore: 0, dxText: 4, dyText: 0, dxScore: 0, dyScore: 0 },
 };
 
 function nudgeFor(name) {
@@ -153,13 +160,86 @@ function nudgeFor(name) {
   };
 }
 
-export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
+/** ---------------- 导出 PNG：给父组件 ref / onReady 两种方式同时支持 ---------------- */
+function createExportApi(chartRef) {
+  const exportPng = (opts = {}) => {
+    const inst = chartRef.current?.getEchartsInstance?.();
+    if (!inst) throw new Error("ECharts instance not ready");
+
+    const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor } = opts;
+
+    try {
+      inst.resize?.();
+    } catch {}
+
+    const payload = {
+      type: "png",
+      pixelRatio,
+      excludeComponents,
+      ...(backgroundColor != null ? { backgroundColor } : {}), // 不传 => 透明背景
+    };
+
+    return inst.getDataURL(payload);
+  };
+
+  const exportPngAsync = (opts = {}) => {
+    const inst = chartRef.current?.getEchartsInstance?.();
+    if (!inst) return Promise.reject(new Error("ECharts instance not ready"));
+
+    const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor, timeoutMs = 3000 } = opts;
+
+    return new Promise((resolve, reject) => {
+      let done = false;
+
+      const finish = () => {
+        if (done) return;
+        done = true;
+        try {
+          inst.off?.("finished", finish);
+        } catch {}
+
+        try {
+          inst.resize?.();
+          const payload = {
+            type: "png",
+            pixelRatio,
+            excludeComponents,
+            ...(backgroundColor != null ? { backgroundColor } : {}), // 不传 => 透明背景
+          };
+          const url = inst.getDataURL(payload);
+          resolve(url);
+        } catch (e) {
+          reject(e);
+        }
+      };
+
+      try {
+        inst.on?.("finished", finish);
+      } catch {}
+
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+
+      setTimeout(() => {
+        if (!done) {
+          try {
+            inst.off?.("finished", finish);
+          } catch {}
+          reject(new Error("exportPngAsync timeout"));
+        }
+      }, timeoutMs);
+    });
+  };
+
+  return { exportPng, exportPngAsync };
+}
+
+/** ✅ forwardRef：父组件可直接 radarRef.current.exportPng() */
+const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores, onReady }, ref) {
   if (!subScores || !dimScores) return null;
 
-  // ✅ 用于确认文件是否真的被加载（看浏览器 Console）
-  console.log("[RadarSemiRadar] LOADED radius=85% 2026-01-20");
-
   const chartRef = useRef(null);
+
+  useImperativeHandle(ref, () => createExportApi(chartRef), []);
 
   const segments = useMemo(() => {
     const all = [...buildTopSegments(), ...buildBottomSegments()];
@@ -192,8 +272,8 @@ export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
       animation: false,
       legend: { show: false },
 
-      // ✅ 仅最小改动：radius 从 66% 改为 85%
-      polar: { center: ["50%", "55%"], radius: "85%" },
+      // ✅ 关键修改：radius 调到 85%
+      polar: { center: ["50%", "52%"], radius: "87%" },
 
       angleAxis: {
         type: "value",
@@ -254,7 +334,7 @@ export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
           },
         },
 
-        // ② 分隔线
+        // ② 分隔线 (🟢 修改处：延长水平线)
         {
           type: "custom",
           coordinateSystem: "polar",
@@ -269,7 +349,12 @@ export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
             const angDeg = DIM_BOUNDARY_ANGLES[params.dataIndex] ?? 0;
             const cx = coordSys.cx;
             const cy = coordSys.cy;
-            const r = coordSys.r * DIVIDER_LEN;
+
+            // 🟢 修改逻辑：如果是 0° 或 180°（水平线），则倍数设为 1.15，否则 1.0
+            const isHorizontal = angDeg === 0 || angDeg === 180;
+            const lenFactor = isHorizontal ? 1.15 : DIVIDER_LEN;
+
+            const r = coordSys.r * lenFactor;
 
             const a = (angDeg * Math.PI) / 180;
             const x = cx + -Math.cos(a) * r;
@@ -310,7 +395,7 @@ export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
                 y: p.y + p.uy * SCORE_OUT_PX + n.dyScore,
                 text: fmt2(d.score),
                 fill: "#0f172a",
-                fontSize: 12,
+                fontSize: 26,
                 fontWeight: 700,
                 textAlign: side === "right" ? "left" : "right",
                 textVerticalAlign: "middle",
@@ -346,7 +431,7 @@ export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
                 y: p.y + p.uy * TEXT_OUT_PX + n.dyText,
                 text: d.name,
                 fill: "#334155",
-                fontSize: 12,
+                fontSize: 24,
                 textAlign: side === "right" ? "left" : "right",
                 textVerticalAlign: "middle",
               },
@@ -377,9 +462,9 @@ export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
                 y: p.y,
                 text: `${d.name}\n${fmt2(score)}`,
                 fill: "#0f172a",
-                fontSize: 13,
+                fontSize: 28,
                 fontWeight: 800,
-                lineHeight: 16,
+                lineHeight: 28,
                 textAlign: "center",
                 textVerticalAlign: "middle",
               },
@@ -390,82 +475,16 @@ export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
     };
   }, [segments, dimScores, hiTopMin3, hiBottomMax3]);
 
-  // ✅ 导出：增加 async 版本（等待 finished）
+  // 继续支持 onReady(api)
   useEffect(() => {
     if (typeof onReady !== "function") return;
-
-    const api = {
-      exportPng: (opts = {}) => {
-        const inst = chartRef.current?.getEchartsInstance?.();
-        if (!inst) throw new Error("ECharts instance not ready");
-
-        const { pixelRatio = 2, backgroundColor = "#ffffff", excludeComponents = ["toolbox"] } = opts;
-
-        try {
-          inst.resize?.();
-        } catch {}
-
-        return inst.getDataURL({
-          type: "png",
-          pixelRatio,
-          backgroundColor,
-          excludeComponents,
-        });
-      },
-
-      exportPngAsync: (opts = {}) => {
-        const inst = chartRef.current?.getEchartsInstance?.();
-        if (!inst) return Promise.reject(new Error("ECharts instance not ready"));
-
-        const { pixelRatio = 2, backgroundColor = "#ffffff", excludeComponents = ["toolbox"], timeoutMs = 3000 } = opts;
-
-        return new Promise((resolve, reject) => {
-          let done = false;
-          const finish = () => {
-            if (done) return;
-            done = true;
-            try {
-              inst.off?.("finished", finish);
-            } catch {}
-
-            try {
-              inst.resize?.();
-              const url = inst.getDataURL({
-                type: "png",
-                pixelRatio,
-                backgroundColor,
-                excludeComponents,
-              });
-              resolve(url);
-            } catch (e) {
-              reject(e);
-            }
-          };
-
-          try {
-            inst.on?.("finished", finish);
-          } catch {}
-
-          requestAnimationFrame(() => requestAnimationFrame(finish));
-
-          setTimeout(() => {
-            if (!done) {
-              try {
-                inst.off?.("finished", finish);
-              } catch {}
-              reject(new Error("exportPngAsync timeout"));
-            }
-          }, timeoutMs);
-        });
-      },
-    };
-
+    const api = createExportApi(chartRef);
     onReady(api);
     return () => onReady(null);
   }, [onReady]);
 
   return (
-    <div style={{ width: "100%", height: 820, overflow: "visible" }}>
+    <div style={{ width: "100%", height: 950, overflow: "visible" }}>
       <ReactECharts
         ref={chartRef}
         option={option}
@@ -476,4 +495,6 @@ export default function RadarSemiRadar({ subScores, dimScores, onReady }) {
       />
     </div>
   );
-}
+});
+
+export default RadarSemiRadar;

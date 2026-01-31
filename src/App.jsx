@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import RadarSemiRadar from "./RadarSemiRadar";
 import ReportTemplate from "./ReportTemplate.jsx";
+import { reportGenerateAsync, waitReportDone } from "./lib/reportApi.js";
+
 
 window.supabase = supabase;
 
@@ -99,37 +101,10 @@ function openSignedUrl(url) {
   window.open(u, "_blank", "noopener,noreferrer");
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function isPngDataUrl(s) {
-  return typeof s === "string" && s.startsWith("data:image/png;base64,");
-}
-
-function ensureRadarPngOrThrow(dataUrl) {
-  if (!dataUrl || typeof dataUrl !== "string") {
-    throw new Error("雷达图导出失败：返回值为空");
-  }
-  if (!isPngDataUrl(dataUrl)) {
-    throw new Error("雷达图导出失败：返回值不是 PNG base64 dataURL");
-  }
-  // 太短通常是空图/异常
-  if (dataUrl.length < 20000) {
-    throw new Error("雷达图导出异常：dataURL 长度过短，疑似空图");
-  }
-  return dataUrl;
-}
-
-function makeRequestId() {
-  // 简单可读：时间戳 + 随机
-  return `rid_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
 // ====================== report-api 地址（统一管理） ======================
-const REPORT_API_BASE = (import.meta.env.VITE_REPORT_API_BASE || "http://localhost:8080").replace(/\/$/, "");
+const REPORT_API_BASE = (import.meta.env.VITE_REPORT_API_BASE || "http://localhost:3000").replace(/\/$/, "");
 const REPORT_API_GENERATE_URL = `${REPORT_API_BASE}/report/generate`;
-const REPORT_API_SIGNED_URL = `${REPORT_API_BASE}/report/signed-url`;
+const REPORT_API_STATUS_URL = `${REPORT_API_BASE}/report/status`;
 
 // ====================== App ======================
 export default function App() {
@@ -171,23 +146,10 @@ export default function App() {
   // per-row action
   const [busyId, setBusyId] = useState(null);
 
-  // 防止组件卸载后 setState 报警
-  const aliveRef = useRef(true);
-  useEffect(() => {
-    aliveRef.current = true;
-    return () => {
-      aliveRef.current = false;
-    };
-  }, []);
-
-  // env（仅展示用）
+  // env
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
   const FN_URL = SUPABASE_URL ? `${SUPABASE_URL.replace(/\/$/, "")}/functions/v1/generate-report` : "";
-
-  // ✅ report-api 用的 API Key（前端打包可见：这是后台站点可接受；后面要更安全我们再升级）
-  const REPORT_API_KEY =
-    (import.meta.env.VITE_REPORT_API_KEY || "").trim() || String(window.REPORT_API_KEY || "").trim();
 
   // ============ auth ============
   useEffect(() => {
@@ -391,23 +353,20 @@ export default function App() {
     }
   }
 
-  // ============ report-api calls（改为 API Key） ============
-  function getApiKeyOrThrow() {
-    const k = String(REPORT_API_KEY || "").trim();
-    if (!k) throw new Error("缺少 REPORT_API_KEY：请在前端 .env 里配置 VITE_REPORT_API_KEY");
-    return k;
+  // ============ report-api calls ============
+  async function getAccessTokenOrThrow() {
+    const { data: sessData } = await supabase.auth.getSession();
+    const accessToken = sessData?.session?.access_token;
+    if (!accessToken) throw new Error("未登录或登录已过期，请重新登录");
+    return accessToken;
   }
 
-  async function postJson(url, body) {
-    const apiKey = getApiKeyOrThrow();
-    const rid = makeRequestId();
-
+  async function postJson(url, body, accessToken) {
     const resp = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "x-request-id": rid,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(body || {}),
     });
@@ -426,17 +385,56 @@ export default function App() {
     return data;
   }
 
-  // ✅ 下载PDF：只走 /report/signed-url，然后 window.open(pdf.url)
-  async function downloadPdfByApi(reportRow) {
-    setBusyId(reportRow.id);
+  async function getJson(url, accessToken) {
+    const resp = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const text = await resp.text().catch(() => "");
+    let data = null;
     try {
-      if (!reportRow?.submission_id) throw new Error("缺少 submission_id，无法下载");
-      const data = await postJson(REPORT_API_SIGNED_URL, { submission_id: reportRow.submission_id });
-      openSignedUrl(data?.pdf?.url);
-    } catch (e) {
-      alert("下载失败：\n" + (e?.message || String(e)));
-    } finally {
-      setBusyId(null);
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error(`后端返回不是 JSON：HTTP ${resp.status}\n${text.slice(0, 400)}`);
+    }
+
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || `HTTP ${resp.status}`);
+    }
+    return data;
+  }
+
+  // ✅ 轮询：直到 /report/status 返回 pdf.url（done）或 error/超时
+  async function pollReportUntilReady({ submissionId, accessToken, timeoutMs = 120000, intervalMs = 1200 }) {
+    const t0 = Date.now();
+    while (true) {
+      const url = `${REPORT_API_STATUS_URL}?submission_id=${encodeURIComponent(submissionId)}`;
+      const data = await getJson(url, accessToken);
+
+      const r = data?.report;
+      const pdfUrl = data?.pdf?.url;
+
+      // done 且有 url
+      if (r?.status === "done" && pdfUrl) return { report: r, pdfUrl };
+
+      // error
+      if (r?.status === "error") {
+        throw new Error(`生成PDF失败：${r?.error || "unknown error"}`);
+      }
+
+      // 超时
+      if (Date.now() - t0 > timeoutMs) {
+        const status = r?.status || "unknown";
+        const pdfPath = r?.pdf_path || "";
+        throw new Error(
+          `PDF 已开始生成但尚未返回下载URL。\nstatus=${status}\npdf_path=${pdfPath}\n\n你可以稍后刷新页面再点“生成PDF(含雷达图)”重试。`
+        );
+      }
+
+      await new Promise((r) => setTimeout(r, intervalMs));
     }
   }
 
@@ -445,10 +443,6 @@ export default function App() {
     const snap = reportRow?.snapshot || {};
     if (!snap?.subscores || !snap?.dimscores) {
       alert("该报告 snapshot 里没有测评数据，无法生成雷达图");
-      return;
-    }
-    if (!reportRow?.submission_id) {
-      alert("该报告缺少 submission_id，无法生成 PDF");
       return;
     }
 
@@ -468,10 +462,8 @@ export default function App() {
     setRadarJobReady((prev) => (prev ? prev : true));
   }, []);
 
-  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate → openSignedUrl
+  // ✅ radarJob 流程：等 ready 后 exportPngAsync → 发后端 /report/generate(异步) → 轮询 /report/status → openSignedUrl
   useEffect(() => {
-    let cancelled = false;
-
     (async () => {
       if (!radarJob) return;
       if (!radarJobReady) return;
@@ -481,63 +473,39 @@ export default function App() {
       try {
         const api = radarJobApiRef.current;
         if (!api?.exportPngAsync) throw new Error("Radar 图导出能力未就绪（exportPngAsync 缺失）");
-        if (!reportRow?.submission_id) throw new Error("缺少 submission_id：无法生成 PDF");
 
-        // 1) 导出 PNG（带兜底重试：解决“渲染刚就绪但导出偶发空图”）
-        let radarPngDataUrl = null;
-        let lastErr = null;
+        const radarPngDataUrl = await api.exportPngAsync({
+          pixelRatio: 3,
+          backgroundColor: "#ffffff",
+          timeoutMs: 12000,
+        });
 
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-            const out = await api.exportPngAsync({
-              pixelRatio: 3,
-              backgroundColor: "#ffffff",
-              timeoutMs: 8000,
-            });
-            radarPngDataUrl = ensureRadarPngOrThrow(out);
-            break;
-          } catch (e) {
-            lastErr = e;
-            // 等一等让 ECharts 完成绘制
-            await sleep(250 * attempt);
-          }
-        }
-        if (!radarPngDataUrl) {
-          throw new Error("雷达图导出失败（已重试 3 次）：\n" + (lastErr?.message || String(lastErr)));
-        }
-
-        // 2) 发后端生成 PDF（强制传 radar_png_data_url）
-        const data = await postJson(REPORT_API_GENERATE_URL, {
-          submission_id: reportRow.submission_id,
+        // 1) 触发后端异步生成（用 REPORT_API_KEY）
+        // 把雷达图 PNG 一并传给后端（以及文件名）
+        await reportGenerateAsync(reportRow.submission_id, {
           radar_png_data_url: radarPngDataUrl,
           display_file_name: reportRow.file_name || null,
         });
 
-        // 3) 刷新列表
+        // 2) 轮询直到 done（拿到 pdf.url）
+        const doneData = await waitReportDone(reportRow.submission_id);
+
+        // 3) 打开 signed url
+        openSignedUrl(doneData?.pdf?.url);
+
+        // 4) 刷新列表
         await fetchReports();
 
-        // 4) 打开下载链接
-        if (data?.pdf?.url) {
-          openSignedUrl(data.pdf.url);
-          alert("PDF 已生成 ✅");
-        } else {
-          alert("PDF 已生成 ✅（但未返回下载URL）");
-        }
+        alert("PDF 已生成 ✅");
       } catch (e) {
         alert("生成PDF失败：\n" + (e?.message || String(e)));
       } finally {
-        if (cancelled || !aliveRef.current) return;
-
         radarJobApiRef.current = null;
         setRadarJob(null);
         setRadarJobReady(false);
         setBusyId(null);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [radarJob, radarJobReady]);
 
@@ -576,9 +544,7 @@ export default function App() {
       <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#fff" }}>
         <div style={{ ...card, width: 460, maxWidth: "92vw" }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>圆桌经营会｜后台登录</h1>
-          <p style={{ marginTop: 8, marginBottom: 14, color: "#64748b", fontSize: 12 }}>
-            请输入管理员账号（Supabase Auth 用户）
-          </p>
+          <p style={{ marginTop: 8, marginBottom: 14, color: "#64748b", fontSize: 12 }}>请输入管理员账号（Supabase Auth 用户）</p>
 
           <form onSubmit={signIn} style={{ display: "grid", gap: 10 }}>
             <label>
@@ -614,21 +580,16 @@ export default function App() {
               />
             </label>
 
-            {loginErr ? (
-              <div style={{ color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>{loginErr}</div>
-            ) : (
-              <div style={{ minHeight: 16 }} />
-            )}
+            {loginErr ? <div style={{ color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>{loginErr}</div> : <div style={{ minHeight: 16 }} />}
 
             <button type="submit" style={{ ...btnPrimary, width: "100%", marginTop: 4 }}>
               登录
             </button>
 
             <div style={{ marginTop: 10, color: "#64748b", fontSize: 11, whiteSpace: "pre-wrap" }}>
-              ENV:{"\n"}VITE_SUPABASE_URL={SUPABASE_URL ? "OK" : "MISSING"}{"\n"}VITE_SUPABASE_ANON_KEY=
-              {SUPABASE_ANON_KEY ? "OK" : "MISSING"}
-              {"\n"}VITE_REPORT_API_BASE={REPORT_API_BASE}
-              {"\n"}VITE_REPORT_API_KEY={REPORT_API_KEY ? "OK" : "MISSING"}
+              ENV:{"\n"}VITE_SUPABASE_URL={SUPABASE_URL ? "OK" : "MISSING"}
+              {"\n"}VITE_SUPABASE_ANON_KEY={SUPABASE_ANON_KEY ? "OK" : "MISSING"}
+              {"\n"}REPORT_API_BASE={REPORT_API_BASE}
               {"\n"}FN_URL={FN_URL || "(missing)"}
             </div>
           </form>
@@ -659,11 +620,7 @@ export default function App() {
             该账号不在 admin_users 授权名单中，或已停用。
           </p>
 
-          {adminRow.message ? (
-            <div style={{ marginTop: 10, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>
-              {adminRow.message}
-            </div>
-          ) : null}
+          {adminRow.message ? <div style={{ marginTop: 10, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>{adminRow.message}</div> : null}
 
           <button onClick={signOut} style={{ ...btn, marginTop: 12 }}>
             退出登录
@@ -683,8 +640,7 @@ export default function App() {
               登录：{session.user.email} ｜ 角色：{adminRow?.role || "-"}
             </div>
             <div style={{ marginTop: 6, color: "#64748b", fontSize: 11, whiteSpace: "pre-wrap" }}>
-              VITE_REPORT_API_BASE: {REPORT_API_BASE}
-              {"\n"}VITE_REPORT_API_KEY: {REPORT_API_KEY ? "OK" : "MISSING"}
+              REPORT_API_BASE: {REPORT_API_BASE}
               {"\n"}FN_URL: {FN_URL || "(missing VITE_SUPABASE_URL)"}
             </div>
           </div>
@@ -735,9 +691,7 @@ export default function App() {
             {loadingSubs ? (
               <div style={{ marginTop: 12, color: "#64748b", fontSize: 12 }}>加载中…</div>
             ) : subsErr ? (
-              <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>
-                读取 submissions 失败：{subsErr}
-              </div>
+              <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>读取 submissions 失败：{subsErr}</div>
             ) : (
               <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
                 {filteredSubs.length === 0 ? (
@@ -747,31 +701,17 @@ export default function App() {
                     const rep = reportBySubmissionId.get(s.id);
                     const hasReport = !!rep;
                     return (
-                      <div
-                        key={s.id}
-                        style={{
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 14,
-                          padding: 12,
-                          background: "#fff",
-                        }}
-                      >
+                      <div key={s.id} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                           <div style={{ fontWeight: 800 }}>
                             {s.name || "-"} ｜ {s.company || "-"}
-                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>
-                              {s.created_at ? new Date(s.created_at).toLocaleString() : ""}
-                            </span>
+                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>{s.created_at ? new Date(s.created_at).toLocaleString() : ""}</span>
                           </div>
 
                           {hasReport ? (
                             <span style={{ color: "#64748b", fontSize: 12 }}>已有报告：{rep.status}</span>
                           ) : (
-                            <button
-                              style={btnPrimary}
-                              disabled={busyId === s.id}
-                              onClick={() => createReportForSubmission(s)}
-                            >
+                            <button style={btnPrimary} disabled={busyId === s.id} onClick={() => createReportForSubmission(s)}>
                               {busyId === s.id ? "创建中…" : "生成报告记录"}
                             </button>
                           )}
@@ -810,9 +750,7 @@ export default function App() {
             </div>
 
             {reportsErr ? (
-              <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>
-                读取 reports 失败：{reportsErr}
-              </div>
+              <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>读取 reports 失败：{reportsErr}</div>
             ) : (
               <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
                 {reports.length === 0 ? (
@@ -821,27 +759,15 @@ export default function App() {
                   reports.map((r) => {
                     const snap = r.snapshot || {};
                     const canPreviewRadar =
-                      Array.isArray(snap?.subscores) &&
-                      snap.subscores.length > 0 &&
-                      snap?.dimscores &&
-                      (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object");
+                      (Array.isArray(snap?.subscores) && snap.subscores.length > 0) &&
+                      (snap?.dimscores && (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object"));
 
                     return (
-                      <div
-                        key={r.id}
-                        style={{
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 14,
-                          padding: 12,
-                          background: "#fff",
-                        }}
-                      >
+                      <div key={r.id} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                           <div style={{ fontWeight: 800 }}>
                             {(snap.name || r.name || "-") + " ｜ " + (snap.company || r.company || "-")}
-                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>
-                              {r.created_at ? new Date(r.created_at).toLocaleString() : ""}
-                            </span>
+                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>{r.created_at ? new Date(r.created_at).toLocaleString() : ""}</span>
                           </div>
 
                           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -872,18 +798,9 @@ export default function App() {
                               style={btnPrimary}
                               disabled={busyId === r.id}
                               onClick={() => startGeneratePdfWithRadar(r)}
-                              title="导出雷达PNG→后端嵌入PDF→存 Reports→立即下载"
+                              title="导出雷达PNG→后端异步生成PDF→轮询状态→自动打开下载链接"
                             >
                               {busyId === r.id ? "生成中…" : "生成PDF(含雷达图)"}
-                            </button>
-
-                            <button
-                              style={btn}
-                              disabled={busyId === r.id}
-                              onClick={() => downloadPdfByApi(r)}
-                              title="从后端拿 signed url 并下载（不依赖 Storage policy）"
-                            >
-                              {busyId === r.id ? "处理中…" : "下载PDF"}
                             </button>
                           </div>
                         </div>

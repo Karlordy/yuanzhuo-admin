@@ -107,18 +107,6 @@ function sideByUnitX(ux) {
   return ux >= 0 ? "right" : "left";
 }
 
-/** 高亮规则：上半球取最小3；下半球取最大3 */
-function topMin3Names(items) {
-  const top = items.filter((x) => x.group === "top");
-  const sorted = [...top].sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
-  return new Set(sorted.slice(0, 3).map((x) => x.name));
-}
-function bottomMax3Names(items) {
-  const bottom = items.filter((x) => x.group === "bottom");
-  const sorted = [...bottom].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  return new Set(sorted.slice(0, 3).map((x) => x.name));
-}
-
 /** 子项微调 */
 const SUB_NUDGE = {
   使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 0, dxScore: 0, dyScore: 0 },
@@ -160,70 +148,38 @@ function nudgeFor(name) {
   };
 }
 
-/** ---------------- 导出 PNG：给父组件 ref / onReady 两种方式同时支持 ---------------- */
+/** ---------------- 导出 PNG 相关工具 ---------------- */
 function createExportApi(chartRef) {
   const exportPng = (opts = {}) => {
     const inst = chartRef.current?.getEchartsInstance?.();
     if (!inst) throw new Error("ECharts instance not ready");
-
     const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor } = opts;
-
-    try {
-      inst.resize?.();
-    } catch {}
-
-    const payload = {
-      type: "png",
-      pixelRatio,
-      excludeComponents,
-      ...(backgroundColor != null ? { backgroundColor } : {}), // 不传 => 透明背景
-    };
-
+    try { inst.resize?.(); } catch {}
+    const payload = { type: "png", pixelRatio, excludeComponents, ...(backgroundColor != null ? { backgroundColor } : {}) };
     return inst.getDataURL(payload);
   };
 
   const exportPngAsync = (opts = {}) => {
     const inst = chartRef.current?.getEchartsInstance?.();
     if (!inst) return Promise.reject(new Error("ECharts instance not ready"));
-
     const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor, timeoutMs = 3000 } = opts;
-
     return new Promise((resolve, reject) => {
       let done = false;
-
       const finish = () => {
         if (done) return;
         done = true;
-        try {
-          inst.off?.("finished", finish);
-        } catch {}
-
+        try { inst.off?.("finished", finish); } catch {}
         try {
           inst.resize?.();
-          const payload = {
-            type: "png",
-            pixelRatio,
-            excludeComponents,
-            ...(backgroundColor != null ? { backgroundColor } : {}), // 不传 => 透明背景
-          };
-          const url = inst.getDataURL(payload);
-          resolve(url);
-        } catch (e) {
-          reject(e);
-        }
+          const payload = { type: "png", pixelRatio, excludeComponents, ...(backgroundColor != null ? { backgroundColor } : {}) };
+          resolve(inst.getDataURL(payload));
+        } catch (e) { reject(e); }
       };
-
-      try {
-        inst.on?.("finished", finish);
-      } catch {}
-
+      try { inst.on?.("finished", finish); } catch {}
       requestAnimationFrame(() => requestAnimationFrame(finish));
-
       setTimeout(() => {
         if (!done) {
-          try {
-            inst.off?.("finished", finish);
-          } catch {}
+          try { inst.off?.("finished", finish); } catch {}
           reject(new Error("exportPngAsync timeout"));
         }
       }, timeoutMs);
@@ -233,12 +189,10 @@ function createExportApi(chartRef) {
   return { exportPng, exportPngAsync };
 }
 
-/** ✅ forwardRef：父组件可直接 radarRef.current.exportPng() */
 const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores, onReady }, ref) {
   if (!subScores || !dimScores) return null;
 
   const chartRef = useRef(null);
-
   useImperativeHandle(ref, () => createExportApi(chartRef), []);
 
   const segments = useMemo(() => {
@@ -249,8 +203,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
     });
   }, [subScores]);
 
-  const hiTopMin3 = useMemo(() => topMin3Names(segments), [segments]);
-  const hiBottomMax3 = useMemo(() => bottomMax3Names(segments), [segments]);
+  // ❌ 已删除：hiTopMin3 和 hiBottomMax3 的计算逻辑
 
   const R_SCORE = 4.2;
   const R_TEXT = 4.65;
@@ -259,10 +212,9 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
   const TEXT_OUT_PX = 24;
 
   const option = useMemo(() => {
+    // 🎨 颜色配置
     const TOP_FILL = "rgba(37, 99, 235, .32)";
-    const TOP_FILL_HI = "rgba(30, 64, 175, .62)";
     const BOT_FILL = "rgba(163, 230, 53, .32)";
-    const BOT_FILL_HI = "rgba(77, 124, 15, .62)";
     const EDGE = "rgba(15, 23, 42, .55)";
     const DIVIDER_LEN = 1;
 
@@ -271,10 +223,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
     return {
       animation: false,
       legend: { show: false },
-
-      // ✅ 关键修改：radius 调到 85%
       polar: { center: ["50%", "52%"], radius: "87%" },
-
       angleAxis: {
         type: "value",
         min: 0,
@@ -286,7 +235,6 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
         axisLabel: { show: false },
         splitLine: { show: false },
       },
-
       radiusAxis: {
         min: 0,
         max: 5,
@@ -296,7 +244,6 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
         axisLabel: { show: false },
         splitLine: { lineStyle: { type: "dashed", color: "rgba(148,163,184,.55)" } },
       },
-
       series: [
         // ① 扇形
         {
@@ -320,8 +267,9 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             const r1 = r0 + (Math.max(0, Math.min(5, score)) / 5) * (rMax - r0);
 
             const isTop = d.group === "top";
-            const isHi = (isTop && hiTopMin3.has(d.name)) || (!isTop && hiBottomMax3.has(d.name));
-            const fill = isTop ? (isHi ? TOP_FILL_HI : TOP_FILL) : isHi ? BOT_FILL_HI : BOT_FILL;
+            
+            // ✅ 修改点：删除 isHi 判断，统一使用基础颜色
+            const fill = isTop ? TOP_FILL : BOT_FILL;
 
             const a0 = Math.PI - (d.a0 * Math.PI) / 180;
             const a1 = Math.PI - (d.a1 * Math.PI) / 180;
@@ -334,28 +282,22 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           },
         },
 
-        // ② 分隔线 (🟢 修改处：延长水平线)
+        // ② 分隔线
         {
           type: "custom",
           coordinateSystem: "polar",
           z: 2,
           clip: false,
           data: DIM_BOUNDARY_ANGLES,
-          tooltip: { show: false },
           renderItem: (params) => {
             const coordSys = params.coordSys;
             if (!coordSys) return null;
-
             const angDeg = DIM_BOUNDARY_ANGLES[params.dataIndex] ?? 0;
             const cx = coordSys.cx;
             const cy = coordSys.cy;
-
-            // 🟢 修改逻辑：如果是 0° 或 180°（水平线），则倍数设为 1.15，否则 1.0
             const isHorizontal = angDeg === 0 || angDeg === 180;
             const lenFactor = isHorizontal ? 1.15 : DIVIDER_LEN;
-
             const r = coordSys.r * lenFactor;
-
             const a = (angDeg * Math.PI) / 180;
             const x = cx + -Math.cos(a) * r;
             const y = cy + Math.sin(a) * r;
@@ -375,16 +317,13 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           z: 10,
           clip: false,
           data: segments,
-          tooltip: { show: false },
           renderItem: (params) => {
             const d = segments[params.dataIndex];
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
-
             const n = nudgeFor(d.name);
             const ang = d.mid + n.da;
             const rVal = R_SCORE + n.drScore;
-
             const p = polarPixel(coordSys, rVal, ang);
             const side = sideByUnitX(p.ux);
 
@@ -411,16 +350,13 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           z: 11,
           clip: false,
           data: segments,
-          tooltip: { show: false },
           renderItem: (params) => {
             const d = segments[params.dataIndex];
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
-
             const n = nudgeFor(d.name);
             const ang = d.mid + n.da;
             const rVal = R_TEXT + n.drText;
-
             const p = polarPixel(coordSys, rVal, ang);
             const side = sideByUnitX(p.ux);
 
@@ -446,15 +382,12 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           z: 12,
           clip: false,
           data: dimAngles,
-          tooltip: { show: false },
           renderItem: (params) => {
             const d = dimAngles[params.dataIndex];
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
-
             const p = polarPixel(coordSys, R_DIM, d.mid);
             const score = dimScores?.[d.name];
-
             return {
               type: "text",
               style: {
@@ -473,9 +406,8 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
         },
       ],
     };
-  }, [segments, dimScores, hiTopMin3, hiBottomMax3]);
+  }, [segments, dimScores]);
 
-  // 继续支持 onReady(api)
   useEffect(() => {
     if (typeof onReady !== "function") return;
     const api = createExportApi(chartRef);

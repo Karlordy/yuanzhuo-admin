@@ -10,39 +10,81 @@ import ReactECharts from "echarts-for-react";
 
 /** ---------------- 7维 / 21子项（上4能力=12项；下3限制=9项） ---------------- */
 const TOP_SUBS = [
-  "使命愿景", "战略关注", "取得成果", 
-  "系统思考", "平衡", "持续产出", 
-  "反思自省", "学习者", "沉着", 
-  "关爱", "培育", "团队合作",
+  "使命愿景",
+  "战略关注",
+  "取得成果",
+  "系统思考",
+  "平衡",
+  "持续产出",
+  "反思自省",
+  "学习者",
+  "沉着",
+  "关爱",
+  "培育",
+  "团队合作",
 ];
 
-const BOTTOM_SUBS = ["取悦", "被动", "保守", "傲慢", "距离感", "挑剔", "完美", "专制", "工作狂"];
+const BOTTOM_SUBS = [
+  "取悦",
+  "被动",
+  "保守",
+  "傲慢",
+  "距离感",
+  "挑剔",
+  "完美",
+  "专制",
+  "工作狂",
+];
 
 const TOP_DIMS = ["成就导向", "系统意识", "自我觉察", "协同赋能"];
 const BOTTOM_DIMS = ["顺从", "防御", "控制"];
 
-/** ---------------- 角度计算 ---------------- */
+/** ---------------- 角度：上半180~360(12*15°)，下半0~180(9*20°) ---------------- */
 function buildTopSegments() {
   const base = 180;
   const step = 15;
+
+  // ✅ 每个大维度 45°，刚好 3 个子项（3*15°=45°）
   return TOP_SUBS.map((name, i) => {
     const a0 = base + i * step;
     const a1 = base + (i + 1) * step;
-    return { name, a0, a1, mid: (a0 + a1) / 2, group: "top" };
+    const dimIndex = Math.floor(i / 3); // 0..3
+    return {
+      name,
+      a0,
+      a1,
+      mid: (a0 + a1) / 2,
+      group: "top",
+      dimIndex,
+      dimName: TOP_DIMS[dimIndex],
+    };
   });
 }
 function buildBottomSegments() {
   const base = 0;
   const step = 20;
+
+  // ✅ 每个大维度 60°，刚好 3 个子项（3*20°=60°）
   return BOTTOM_SUBS.map((name, i) => {
     const a0 = base + i * step;
     const a1 = base + (i + 1) * step;
-    return { name, a0, a1, mid: (a0 + a1) / 2, group: "bottom" };
+    const dimIndex = Math.floor(i / 3); // 0..2
+    return {
+      name,
+      a0,
+      a1,
+      mid: (a0 + a1) / 2,
+      group: "bottom",
+      dimIndex,
+      dimName: BOTTOM_DIMS[dimIndex],
+    };
   });
 }
 
+/** 7根分隔线角度（上4下3） */
 const DIM_BOUNDARY_ANGLES = [0, 60, 120, 180, 225, 270, 315];
 
+/** dim 标签角度（段中心） */
 function buildDimLabelAngles() {
   const top = TOP_DIMS.map((d, i) => {
     const a0 = 180 + i * 45;
@@ -76,16 +118,20 @@ function getSubScore(subScoresMap, subName) {
   return null;
 }
 
+/** 我们自己的 polar->pixel（不依赖 api.coord，避免顺序坑） */
 function polarPixel(coordSys, val0to5, angleDeg, innerRatio = 0.06) {
   const cx = coordSys.cx;
   const cy = coordSys.cy;
   const rMax = coordSys.r;
+
   const r0 = Math.max(10, rMax * innerRatio);
   const vv = Math.max(0, Math.min(5, val0to5));
   const r = r0 + (vv / 5) * (rMax - r0);
+
   const a = (angleDeg * Math.PI) / 180;
   const ux = -Math.cos(a);
   const uy = Math.sin(a);
+
   return { x: cx + ux * r, y: cy + uy * r, ux, uy };
 }
 
@@ -93,44 +139,107 @@ function sideByUnitX(ux) {
   return ux >= 0 ? "right" : "left";
 }
 
-/** 子项微调 (保持原有逻辑) */
+/** 子项微调 */
 const SUB_NUDGE = {
-  使命愿景: { dxText: 9 }, 战略关注: { dxText: 9, dyText: 3 }, 系统思考: { da: 3 },
-  平衡: { da: 3 }, 持续产出: { da: 6 }, 反思自省: { da: -6 }, 学习者: { da: -3 },
-  沉着: { da: -3 }, 培育: { dyText: -3 }, 团队合作: { dxText: -9 },
-  取悦: { dxText: -9 }, 傲慢: { da: 6 }, 距离感: { dxText: 35, dxScore: 32 },
-  挑剔: { da: -6 }, 工作狂: { dxText: 4 },
+  使命愿景: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 0, dxScore: 0, dyScore: 0 },
+  战略关注: { da: 0, drText: 0, drScore: 0, dxText: 9, dyText: 3, dxScore: 0, dyScore: 0 },
+  取得成果: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  系统思考: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  平衡: { da: 3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  持续产出: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  反思自省: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  学习者: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  沉着: { da: -3, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  关爱: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  培育: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: -3, dxScore: 0, dyScore: 0 },
+  团队合作: { da: 0, drText: 0, drScore: 0, dxText: -9, dyText: 0, dxScore: 0, dyScore: 0 },
+
+  取悦: { da: 0, drText: 0, drScore: 0, dxText: -9, dyText: 0, dxScore: 0, dyScore: 0 },
+  被动: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  保守: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  傲慢: { da: 6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+
+  距离感: { da: 0, drText: 0, drScore: 0, dxText: 35, dyText: 0, dxScore: 32, dyScore: 0 },
+  挑剔: { da: -6, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+
+  完美: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  专制: { da: 0, drText: 0, drScore: 0, dxText: 0, dyText: 0, dxScore: 0, dyScore: 0 },
+  工作狂: { da: 0, drText: 0, drScore: 0, dxText: 4, dyText: 0, dxScore: 0, dyScore: 0 },
 };
 
 function nudgeFor(name) {
   const n = SUB_NUDGE[name] || {};
   return {
-    da: n.da || 0, drText: n.drText || 0, drScore: n.drScore || 0,
-    dxText: n.dxText ?? 0, dyText: n.dyText ?? 0, dxScore: n.dxScore || 0, dyScore: n.dyScore || 0,
+    da: n.da || 0,
+    drText: n.drText || 0,
+    drScore: n.drScore || 0,
+    dxText: n.dxText ?? n.dx ?? 0,
+    dyText: n.dyText ?? n.dy ?? 0,
+    dxScore: n.dxScore || 0,
+    dyScore: n.dyScore || 0,
   };
 }
 
-/** ---------------- 导出 PNG 工具 ---------------- */
+/** ---------------- 导出 PNG 相关工具 ---------------- */
 function createExportApi(chartRef) {
   const exportPng = (opts = {}) => {
     const inst = chartRef.current?.getEchartsInstance?.();
     if (!inst) throw new Error("ECharts instance not ready");
-    return inst.getDataURL({ type: "png", pixelRatio: 2, ...opts });
+    const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor } = opts;
+    try { inst.resize?.(); } catch {}
+    const payload = {
+      type: "png",
+      pixelRatio,
+      excludeComponents,
+      ...(backgroundColor != null ? { backgroundColor } : {}),
+    };
+    return inst.getDataURL(payload);
   };
+
   const exportPngAsync = (opts = {}) => {
     const inst = chartRef.current?.getEchartsInstance?.();
     if (!inst) return Promise.reject(new Error("ECharts instance not ready"));
-    return new Promise((resolve) => {
-      inst.on("finished", function f() {
-        inst.off("finished", f);
-        resolve(inst.getDataURL({ type: "png", pixelRatio: 2, ...opts }));
-      });
+    const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor, timeoutMs = 3000 } = opts;
+
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        try { inst.off?.("finished", finish); } catch {}
+        try {
+          inst.resize?.();
+          const payload = {
+            type: "png",
+            pixelRatio,
+            excludeComponents,
+            ...(backgroundColor != null ? { backgroundColor } : {}),
+          };
+          resolve(inst.getDataURL(payload));
+        } catch (e) {
+          reject(e);
+        }
+      };
+
+      try { inst.on?.("finished", finish); } catch {}
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+
+      setTimeout(() => {
+        if (!done) {
+          try { inst.off?.("finished", finish); } catch {}
+          reject(new Error("exportPngAsync timeout"));
+        }
+      }, timeoutMs);
     });
   };
+
   return { exportPng, exportPngAsync };
 }
 
-const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores, onReady }, ref) {
+const RadarSemiRadar = forwardRef(function RadarSemiRadar(
+  { subScores, dimScores, onReady },
+  ref
+) {
   if (!subScores || !dimScores) return null;
 
   const chartRef = useRef(null);
@@ -138,158 +247,236 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
 
   const segments = useMemo(() => {
     const all = [...buildTopSegments(), ...buildBottomSegments()];
-    return all.map((seg) => ({
-      ...seg,
-      score: getSubScore(subScores, seg.name) ?? 0,
-    }));
+    return all.map((seg) => {
+      const sc = getSubScore(subScores, seg.name);
+      return { ...seg, score: sc == null ? 0 : sc };
+    });
   }, [subScores]);
 
-  const option = useMemo(() => {
-    // 🎨 调优后的和谐渐变色 (4蓝 3绿)
-    const TOP_FILLS = [
-      "rgba(59, 130, 246, 0.18)", // 浅蓝
-      "rgba(59, 130, 246, 0.28)", 
-      "rgba(37, 99, 235, 0.38)", 
-      "rgba(29, 78, 216, 0.48)", // 中深蓝
-    ];
-    const BOT_FILLS = [
-      "rgba(163, 230, 53, 0.18)", // 浅绿
-      "rgba(132, 204, 22, 0.33)", 
-      "rgba(101, 163, 13, 0.48)", // 中深绿
-    ];
-    const EDGE = "rgba(15, 23, 42, 0.55)";
+  const R_SCORE = 4.2;
+  const R_TEXT = 4.65;
+  const R_DIM = 2.45;
+  const SCORE_OUT_PX = 10;
+  const TEXT_OUT_PX = 24;
 
-    const dimLabelAngles = buildDimLabelAngles();
+  const option = useMemo(() => {
+    /**
+     * 🎨 高级“同色系渐变档位”
+     * - 不用特别跳的纯色，用「低饱和、统一基色、不同透明度」来做深浅层次
+     * - 你要的是“维度块一眼可分”，所以按 dimIndex 分档即可
+     */
+    const TOP_DIM_FILLS = [
+      "rgba(37, 99, 235, 0.18)", // 成就导向（最浅蓝）
+      "rgba(37, 99, 235, 0.26)", // 系统意识
+      "rgba(37, 99, 235, 0.34)", // 自我觉察
+      "rgba(37, 99, 235, 0.42)", // 协同赋能（最深蓝）
+    ];
+
+    const BOT_DIM_FILLS = [
+      "rgba(132, 204, 22, 0.18)", // 顺从（最浅绿）
+      "rgba(132, 204, 22, 0.28)", // 防御
+      "rgba(132, 204, 22, 0.38)", // 控制（最深绿）
+    ];
+
+    const EDGE = "rgba(15, 23, 42, 0.55)";
+    const DIVIDER_LEN = 1;
+
+    const dimAngles = buildDimLabelAngles();
 
     return {
       animation: false,
+      legend: { show: false },
       polar: { center: ["50%", "52%"], radius: "87%" },
       angleAxis: {
-        type: "value", min: 0, max: 360, startAngle: 180, clockwise: true,
-        axisLine: { show: false }, axisTick: { show: false }, axisLabel: { show: false }, splitLine: { show: false },
+        type: "value",
+        min: 0,
+        max: 360,
+        startAngle: 180,
+        clockwise: true,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false },
       },
       radiusAxis: {
-        min: 0, max: 5, splitNumber: 5,
-        axisLine: { show: false }, axisTick: { show: false }, axisLabel: { show: false },
-        splitLine: { lineStyle: { type: "dashed", color: "rgba(148,163,184,.55)" } },
+        min: 0,
+        max: 5,
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: {
+          lineStyle: { type: "dashed", color: "rgba(148,163,184,.55)" },
+        },
       },
       series: [
+        // ① 扇形
         {
           name: "子项（扇形）",
           type: "custom",
           coordinateSystem: "polar",
           z: 3,
+          clip: false,
           data: segments,
           renderItem: (params) => {
             const d = segments[params.dataIndex];
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
 
-            const r0 = Math.max(10, coordSys.r * 0.06);
-            const r1 = r0 + (Math.max(0, Math.min(5, d.score)) / 5) * (coordSys.r - r0);
+            const cx = coordSys.cx;
+            const cy = coordSys.cy;
+            const rMax = coordSys.r;
 
-            // 🎯 核心逻辑：根据当前项在大维度中的位置计算颜色
-            let fill;
-            if (d.group === "top") {
-              const idx = Math.floor((d.a0 - 180) / 45); // 180-360度分4份
-              fill = TOP_FILLS[Math.min(idx, 3)];
-            } else {
-              const idx = Math.floor(d.a0 / 60); // 0-180度分3份
-              fill = BOT_FILLS[Math.min(idx, 2)];
-            }
+            const score = typeof d.score === "number" ? d.score : 0;
+            const r0 = Math.max(10, rMax * 0.06);
+            const r1 =
+              r0 +
+              (Math.max(0, Math.min(5, score)) / 5) * (rMax - r0);
+
+            const isTop = d.group === "top";
+
+            // ✅ 关键：按大维度分档（渐变深浅）
+            const fill = isTop
+              ? (TOP_DIM_FILLS[d.dimIndex] || TOP_DIM_FILLS[0])
+              : (BOT_DIM_FILLS[d.dimIndex] || BOT_DIM_FILLS[0]);
 
             const a0 = Math.PI - (d.a0 * Math.PI) / 180;
             const a1 = Math.PI - (d.a1 * Math.PI) / 180;
 
             return {
               type: "sector",
-              shape: { cx: coordSys.cx, cy: coordSys.cy, r0, r: r1, startAngle: a1, endAngle: a0 },
+              shape: { cx, cy, r0, r: r1, startAngle: a1, endAngle: a0 },
               style: { fill, stroke: EDGE, lineWidth: 1.2 },
             };
           },
         },
-        // ② 分隔黑线
+
+        // ② 分隔线
         {
           type: "custom",
           coordinateSystem: "polar",
-          z: 4,
+          z: 2,
+          clip: false,
           data: DIM_BOUNDARY_ANGLES,
           renderItem: (params) => {
             const coordSys = params.coordSys;
-            const angDeg = DIM_BOUNDARY_ANGLES[params.dataIndex];
-            const isH = angDeg === 0 || angDeg === 180;
-            const r = isH ? coordSys.r * 1.15 : coordSys.r;
+            if (!coordSys) return null;
+            const angDeg = DIM_BOUNDARY_ANGLES[params.dataIndex] ?? 0;
+            const cx = coordSys.cx;
+            const cy = coordSys.cy;
+            const isHorizontal = angDeg === 0 || angDeg === 180;
+            const lenFactor = isHorizontal ? 1.15 : DIVIDER_LEN;
+            const r = coordSys.r * lenFactor;
             const a = (angDeg * Math.PI) / 180;
+            const x = cx + -Math.cos(a) * r;
+            const y = cy + Math.sin(a) * r;
+
             return {
               type: "line",
-              shape: { 
-                x1: coordSys.cx, y1: coordSys.cy, 
-                x2: coordSys.cx + -Math.cos(a) * r, y2: coordSys.cy + Math.sin(a) * r 
-              },
+              shape: { x1: cx, y1: cy, x2: x, y2: y },
               style: { stroke: "#000", lineWidth: 2.2 },
             };
           },
         },
-        // ③ 分数文本
+
+        // ③ 分数文字
         {
           type: "custom",
           coordinateSystem: "polar",
           z: 10,
+          clip: false,
           data: segments,
           renderItem: (params) => {
             const d = segments[params.dataIndex];
+            const coordSys = params.coordSys;
+            if (!d || !coordSys) return null;
             const n = nudgeFor(d.name);
-            const p = polarPixel(params.coordSys, 4.2 + n.drScore, d.mid + n.da);
+            const ang = d.mid + n.da;
+            const rVal = R_SCORE + n.drScore;
+            const p = polarPixel(coordSys, rVal, ang);
             const side = sideByUnitX(p.ux);
+
             return {
               type: "text",
               style: {
-                x: p.x + p.ux * 10 + (side === "right" ? 6 : -6) + n.dxScore,
-                y: p.y + p.uy * 10 + n.dyScore,
-                text: fmt2(d.score), fill: "#0f172a", fontSize: 26, fontWeight: 700,
-                textAlign: side === "right" ? "left" : "right", textVerticalAlign: "middle",
+                x:
+                  p.x +
+                  p.ux * SCORE_OUT_PX +
+                  (side === "right" ? 6 : -6) +
+                  n.dxScore,
+                y: p.y + p.uy * SCORE_OUT_PX + n.dyScore,
+                text: fmt2(d.score),
+                fill: "#0f172a",
+                fontSize: 26,
+                fontWeight: 700,
+                textAlign: side === "right" ? "left" : "right",
+                textVerticalAlign: "middle",
               },
             };
           },
         },
-        // ④ 子项标签
+
+        // ④ 子项文字
         {
           type: "custom",
           coordinateSystem: "polar",
           z: 11,
+          clip: false,
           data: segments,
           renderItem: (params) => {
             const d = segments[params.dataIndex];
+            const coordSys = params.coordSys;
+            if (!d || !coordSys) return null;
             const n = nudgeFor(d.name);
-            const p = polarPixel(params.coordSys, 4.65 + n.drText, d.mid + n.da);
+            const ang = d.mid + n.da;
+            const rVal = R_TEXT + n.drText;
+            const p = polarPixel(coordSys, rVal, ang);
             const side = sideByUnitX(p.ux);
+
             return {
               type: "text",
               style: {
-                x: p.x + p.ux * 24 + (side === "right" ? 8 : -8) + n.dxText,
-                y: p.y + p.uy * 24 + n.dyText,
-                text: d.name, fill: "#334155", fontSize: 24,
-                textAlign: side === "right" ? "left" : "right", textVerticalAlign: "middle",
+                x:
+                  p.x +
+                  p.ux * TEXT_OUT_PX +
+                  (side === "right" ? 8 : -8) +
+                  n.dxText,
+                y: p.y + p.uy * TEXT_OUT_PX + n.dyText,
+                text: d.name,
+                fill: "#334155",
+                fontSize: 24,
+                textAlign: side === "right" ? "left" : "right",
+                textVerticalAlign: "middle",
               },
             };
           },
         },
-        // ⑤ 维度中心标签
+
+        // ⑤ 维度文字
         {
           type: "custom",
           coordinateSystem: "polar",
           z: 12,
-          data: dimLabelAngles,
+          clip: false,
+          data: dimAngles,
           renderItem: (params) => {
-            const d = dimLabelAngles[params.dataIndex];
-            const p = polarPixel(params.coordSys, 2.45, d.mid);
+            const d = dimAngles[params.dataIndex];
+            const coordSys = params.coordSys;
+            if (!d || !coordSys) return null;
+            const p = polarPixel(coordSys, R_DIM, d.mid);
             const score = dimScores?.[d.name];
             return {
               type: "text",
               style: {
-                x: p.x, y: p.y, text: `${d.name}\n${fmt2(score)}`,
-                fill: "#0f172a", fontSize: 28, fontWeight: 800, lineHeight: 28,
-                textAlign: "center", textVerticalAlign: "middle",
+                x: p.x,
+                y: p.y,
+                text: `${d.name}\n${fmt2(score)}`,
+                fill: "#0f172a",
+                fontSize: 28,
+                fontWeight: 800,
+                lineHeight: 28,
+                textAlign: "center",
+                textVerticalAlign: "middle",
               },
             };
           },
@@ -299,9 +486,10 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
   }, [segments, dimScores]);
 
   useEffect(() => {
-    if (typeof onReady === "function") {
-      onReady(createExportApi(chartRef));
-    }
+    if (typeof onReady !== "function") return;
+    const api = createExportApi(chartRef);
+    onReady(api);
+    return () => onReady(null);
   }, [onReady]);
 
   return (
@@ -312,6 +500,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
         style={{ width: "100%", height: "100%" }}
         opts={{ renderer: "canvas" }}
         notMerge={true}
+        lazyUpdate={false}
       />
     </div>
   );

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import RadarSemiRadar from "./RadarSemiRadar";
 import ReportTemplate from "./ReportTemplate.jsx";
-import { reportGenerateAsync, waitReportDone } from "./lib/reportApi.js";
+import { reportGenerateAsync, reportSignedUrl, waitReportDone } from "./lib/reportApi.js";
+import { batchDownloadReports, createAdminUser, disableAdminUser, listAdminUsers } from "./lib/adminApi.js";
 
 
 window.supabase = supabase;
@@ -189,10 +190,36 @@ function openSignedUrl(url) {
   window.open(u, "_blank", "noopener,noreferrer");
 }
 
+function saveActiveReportJob(job) {
+  try {
+    window.localStorage.setItem(ACTIVE_REPORT_JOB_KEY, JSON.stringify({ ...job, saved_at: Date.now() }));
+  } catch {
+    // ignore
+  }
+}
+
+function loadActiveReportJob() {
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_REPORT_JOB_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearActiveReportJob() {
+  try {
+    window.localStorage.removeItem(ACTIVE_REPORT_JOB_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 // ====================== report-api 地址（统一管理） ======================
 const REPORT_API_BASE = (import.meta.env.VITE_REPORT_API_BASE || "http://localhost:3000").replace(/\/$/, "");
 const REPORT_API_GENERATE_URL = `${REPORT_API_BASE}/report/generate`;
 const REPORT_API_STATUS_URL = `${REPORT_API_BASE}/report/status`;
+const ACTIVE_REPORT_JOB_KEY = "yuanzhuo_admin_active_report_job";
 
 // ====================== App ======================
 export default function App() {
@@ -220,6 +247,16 @@ export default function App() {
   const [loadingReports, setLoadingReports] = useState(false);
   const [reports, setReports] = useState([]);
   const [reportsErr, setReportsErr] = useState("");
+  const [selectedReportIds, setSelectedReportIds] = useState([]);
+  const [batchBusy, setBatchBusy] = useState(false);
+
+  // admin users
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminUsersErr, setAdminUsersErr] = useState("");
+  const [adminUsersBusy, setAdminUsersBusy] = useState(false);
+  const [newAdminEmail, setNewAdminEmail] = useState("");
+  const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [newAdminRole, setNewAdminRole] = useState("report_admin");
 
   // preview
   const [preview, setPreview] = useState(null);
@@ -233,6 +270,7 @@ export default function App() {
 
   // per-row action
   const [busyId, setBusyId] = useState(null);
+  const recoveringJobRef = useRef(false);
 
   // env
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
@@ -251,6 +289,9 @@ export default function App() {
       setSubsErr("");
       setReports([]);
       setReportsErr("");
+      setSelectedReportIds([]);
+      setAdminUsers([]);
+      setAdminUsersErr("");
       setPreview(null);
       setPreviewRadarPng(null);
 
@@ -337,13 +378,61 @@ export default function App() {
     }
   }
 
+  async function fetchAdminUsers() {
+    if (!session?.user?.id) return;
+    if (!adminRow || adminRow.blocked || adminRow.role !== "system_admin") return;
+
+    setAdminUsersBusy(true);
+    setAdminUsersErr("");
+    try {
+      const token = await getAccessTokenOrThrow();
+      const data = await listAdminUsers(token);
+      setAdminUsers(data?.users || []);
+    } catch (e) {
+      setAdminUsersErr(e?.message || String(e));
+    } finally {
+      setAdminUsersBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (!session?.user?.id) return;
     if (!adminRow || adminRow.blocked) return;
     fetchSubmissions();
     fetchReports();
+    if (adminRow.role === "system_admin") fetchAdminUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id, adminRow]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    if (!adminRow || adminRow.blocked) return;
+    if (recoveringJobRef.current || busyId || radarJob) return;
+
+    const job = loadActiveReportJob();
+    if (!job?.submission_id || Date.now() - Number(job.saved_at || 0) > 30 * 60 * 1000) {
+      if (job) clearActiveReportJob();
+      return;
+    }
+
+    recoveringJobRef.current = true;
+    setBusyId(job.report_id || job.submission_id);
+
+    (async () => {
+      try {
+        const doneData = await waitReportDone(job.submission_id, 2000, 180000);
+        openSignedUrl(doneData?.pdf?.url);
+        clearActiveReportJob();
+        await fetchReports();
+      } catch {
+        // Keep the job in localStorage so the user can refresh/retry while generation continues.
+      } finally {
+        recoveringJobRef.current = false;
+        setBusyId(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id, adminRow, reports.length]);
 
   const filteredSubs = useMemo(() => {
     const kw = q.trim().toLowerCase();
@@ -368,16 +457,99 @@ export default function App() {
 
   async function signOut() {
     await supabase.auth.signOut();
+    clearActiveReportJob();
     setSession(null);
     setAdminRow(undefined);
     setSubs([]);
     setReports([]);
+    setSelectedReportIds([]);
+    setAdminUsers([]);
+    setAdminUsersErr("");
     setPreview(null);
     radarApiRef.current = null;
 
     radarJobApiRef.current = null;
     setRadarJob(null);
     setRadarJobReady(false);
+  }
+
+  function toggleReportSelection(reportId) {
+    setSelectedReportIds((prev) => {
+      if (prev.includes(reportId)) return prev.filter((id) => id !== reportId);
+      if (prev.length >= 10) {
+        alert("最多一次选择 10 份报告");
+        return prev;
+      }
+      return [...prev, reportId];
+    });
+  }
+
+  async function startBatchDownload() {
+    if (!selectedReportIds.length) {
+      alert("请先选择要批量下载的报告");
+      return;
+    }
+    setBatchBusy(true);
+    try {
+      const token = await getAccessTokenOrThrow();
+      const data = await batchDownloadReports(token, selectedReportIds);
+      openSignedUrl(data?.zip?.url);
+      setSelectedReportIds([]);
+    } catch (e) {
+      alert("批量下载失败：\n" + (e?.message || String(e)));
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  async function downloadExistingReport(reportRow) {
+    if (!reportRow?.submission_id) return;
+    setBusyId(reportRow.id);
+    try {
+      const data = await reportSignedUrl(reportRow.submission_id);
+      openSignedUrl(data?.pdf?.url);
+    } catch (e) {
+      alert("下载报告失败：\n" + (e?.message || String(e)));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function submitCreateAdmin(e) {
+    e.preventDefault();
+    setAdminUsersErr("");
+    setAdminUsersBusy(true);
+    try {
+      const token = await getAccessTokenOrThrow();
+      await createAdminUser(token, {
+        email: newAdminEmail,
+        password: newAdminPassword,
+        role: newAdminRole,
+      });
+      setNewAdminEmail("");
+      setNewAdminPassword("");
+      setNewAdminRole("report_admin");
+      await fetchAdminUsers();
+    } catch (err) {
+      setAdminUsersErr(err?.message || String(err));
+    } finally {
+      setAdminUsersBusy(false);
+    }
+  }
+
+  async function stopAdminUser(userId, emailText) {
+    if (!window.confirm(`确认停用管理员账号：${emailText || userId}？`)) return;
+    setAdminUsersErr("");
+    setAdminUsersBusy(true);
+    try {
+      const token = await getAccessTokenOrThrow();
+      await disableAdminUser(token, userId);
+      await fetchAdminUsers();
+    } catch (err) {
+      setAdminUsersErr(err?.message || String(err));
+    } finally {
+      setAdminUsersBusy(false);
+    }
   }
 
   // ============ create report row ============
@@ -566,6 +738,7 @@ export default function App() {
           radar_png_data_url: radarPngDataUrl,
           display_file_name: reportRow.file_name || null,
         });
+        saveActiveReportJob({ report_id: reportRow.id, submission_id: reportRow.submission_id });
 
         // 2) 轮询直到 done（拿到 pdf.url）
         const doneData = await waitReportDone(reportRow.submission_id);
@@ -575,6 +748,7 @@ export default function App() {
 
         // 4) 刷新列表
         await fetchReports();
+        clearActiveReportJob();
 
         alert("PDF 已生成 ✅");
       } catch (e) {
@@ -730,17 +904,24 @@ export default function App() {
         </div>
 
         <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
-          <button style={pill(tab === "submissions")} onClick={() => setTab("submissions")}>
+          <button type="button" style={pill(tab === "submissions")} onClick={() => setTab("submissions")}>
             Submissions
           </button>
-          <button style={pill(tab === "reports")} onClick={() => setTab("reports")}>
+          <button type="button" style={pill(tab === "reports")} onClick={() => setTab("reports")}>
             Reports
           </button>
+          {adminRow?.role === "system_admin" ? (
+            <button type="button" style={pill(tab === "admins")} onClick={() => setTab("admins")}>
+              Admin Users
+            </button>
+          ) : null}
           <button
+            type="button"
             style={{ ...btn, marginLeft: "auto" }}
             onClick={() => {
               fetchSubmissions();
               fetchReports();
+              if (adminRow?.role === "system_admin") fetchAdminUsers();
             }}
           >
             刷新
@@ -822,11 +1003,92 @@ export default function App() {
               </div>
             )}
           </div>
+        ) : tab === "admins" ? (
+          <div style={{ ...card, marginTop: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 800 }}>Admin Users</div>
+                <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>system_admin can create or disable admin accounts.</div>
+              </div>
+              <button type="button" style={btn} disabled={adminUsersBusy} onClick={fetchAdminUsers}>
+                {adminUsersBusy ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+
+            <form onSubmit={submitCreateAdmin} style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1.4fr 1fr 180px 120px", gap: 10, alignItems: "end" }}>
+              <label>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Email</div>
+                <input
+                  value={newAdminEmail}
+                  onChange={(e) => setNewAdminEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 14 }}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Initial password</div>
+                <input
+                  type="password"
+                  value={newAdminPassword}
+                  onChange={(e) => setNewAdminPassword(e.target.value)}
+                  placeholder="at least 8 chars"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 14 }}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Role</div>
+                <select
+                  value={newAdminRole}
+                  onChange={(e) => setNewAdminRole(e.target.value)}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 14, background: "#fff" }}
+                >
+                  <option value="report_admin">report_admin</option>
+                  <option value="system_admin">system_admin</option>
+                </select>
+              </label>
+              <button type="submit" style={btnPrimary} disabled={adminUsersBusy}>
+                Create
+              </button>
+            </form>
+
+            {adminUsersErr ? <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>{adminUsersErr}</div> : null}
+
+            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+              {adminUsers.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: 12 }}>No admin users loaded.</div>
+              ) : (
+                adminUsers.map((u) => (
+                  <div key={u.user_id || u.email} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 800 }}>{u.email}</div>
+                      <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>
+                        role: {u.role} ｜ status: {u.is_active ? "active" : "disabled"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      style={btn}
+                      disabled={adminUsersBusy || !u.is_active || u.user_id === session?.user?.id}
+                      onClick={() => stopAdminUser(u.user_id, u.email)}
+                    >
+                      Disable
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         ) : (
           <div style={{ ...card, marginTop: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
               <div style={{ fontWeight: 800 }}>Reports（最近 200 条）</div>
-              {loadingReports ? <div style={{ color: "#64748b", fontSize: 12 }}>加载中…</div> : null}
+              <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ color: "#64748b", fontSize: 12 }}>已选：{selectedReportIds.length}/10</span>
+                <button type="button" style={btnPrimary} disabled={batchBusy || selectedReportIds.length === 0} onClick={startBatchDownload}>
+                  {batchBusy ? "打包中..." : "批量下载"}
+                </button>
+                {loadingReports ? <div style={{ color: "#64748b", fontSize: 12 }}>加载中…</div> : null}
+              </div>
             </div>
 
             {reportsErr ? (
@@ -839,6 +1101,7 @@ export default function App() {
                   reports.map((r) => {
                     const liveSubmission = subs.find((s) => s?.id === r?.submission_id);
                     const snap = liveSubmission ? buildSnapshotFromSubmission(liveSubmission) : r.snapshot || {};
+                    const canBatchDownload = r.status === "done" && !!r.pdf_path;
                     const canPreviewRadar =
                       (Array.isArray(snap?.subscores) && snap.subscores.length > 0) &&
                       (snap?.dimscores && (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object"));
@@ -846,9 +1109,18 @@ export default function App() {
                     return (
                       <div key={r.id} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                          <div style={{ fontWeight: 800 }}>
-                            {(snap.name || r.name || "-") + " ｜ " + (snap.company || r.company || "-")}
-                            <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>{r.created_at ? new Date(r.created_at).toLocaleString() : ""}</span>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedReportIds.includes(r.id)}
+                              disabled={!canBatchDownload}
+                              onChange={() => toggleReportSelection(r.id)}
+                              title={canBatchDownload ? "选择批量下载" : "只有已生成 PDF 的报告可以批量下载"}
+                            />
+                            <div style={{ fontWeight: 800 }}>
+                              {(snap.name || r.name || "-") + " ｜ " + (snap.company || r.company || "-")}
+                              <span style={{ marginLeft: 10, color: "#64748b", fontSize: 12, fontWeight: 500 }}>{r.created_at ? new Date(r.created_at).toLocaleString() : ""}</span>
+                            </div>
                           </div>
 
                           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -875,7 +1147,19 @@ export default function App() {
                               <span style={{ color: "#94a3b8", fontSize: 12 }}>（无测评数据）</span>
                             )}
 
+                            {r.status === "done" && r.pdf_path ? (
+                              <button
+                                type="button"
+                                style={btnPrimary}
+                                disabled={busyId === r.id}
+                                onClick={() => downloadExistingReport(r)}
+                              >
+                                下载PDF
+                              </button>
+                            ) : null}
+
                             <button
+                              type="button"
                               style={btnPrimary}
                               disabled={busyId === r.id}
                               onClick={() => startGeneratePdfWithRadar(r)}

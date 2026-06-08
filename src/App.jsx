@@ -271,6 +271,7 @@ export default function App() {
   // per-row action
   const [busyId, setBusyId] = useState(null);
   const recoveringJobRef = useRef(false);
+  const activeUserIdRef = useRef(null);
 
   // env
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
@@ -279,12 +280,7 @@ export default function App() {
 
   // ============ auth ============
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session || null));
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setAdminRow(undefined);
-      setLoginErr("");
+    function resetAuthScopedState() {
       setSubs([]);
       setSubsErr("");
       setReports([]);
@@ -299,7 +295,38 @@ export default function App() {
       radarJobApiRef.current = null;
       setRadarJob(null);
       setRadarJobReady(false);
+    }
 
+    supabase.auth.getSession().then(({ data }) => {
+      const nextSession = data.session || null;
+      activeUserIdRef.current = nextSession?.user?.id || null;
+      setSession(nextSession);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setLoginErr("");
+
+      const nextUserId = nextSession?.user?.id || null;
+      const prevUserId = activeUserIdRef.current;
+
+      if (!nextSession) {
+        activeUserIdRef.current = null;
+        setSession(null);
+        setAdminRow(undefined);
+        resetAuthScopedState();
+        setTab("submissions");
+        return;
+      }
+
+      if (prevUserId && prevUserId === nextUserId) {
+        setSession(nextSession);
+        return;
+      }
+
+      activeUserIdRef.current = nextUserId;
+      setSession(nextSession);
+      setAdminRow(undefined);
+      resetAuthScopedState();
       setTab("submissions");
     });
 
@@ -1158,15 +1185,17 @@ export default function App() {
                               </button>
                             ) : null}
 
-                            <button
-                              type="button"
-                              style={btnPrimary}
-                              disabled={busyId === r.id}
-                              onClick={() => startGeneratePdfWithRadar(r)}
-                              title="导出雷达PNG→后端异步生成PDF→轮询状态→自动打开下载链接"
-                            >
-                              {busyId === r.id ? "生成中…" : "生成PDF(含雷达图)"}
-                            </button>
+                            {r.status !== "done" || !r.pdf_path ? (
+                              <button
+                                type="button"
+                                style={btnPrimary}
+                                disabled={busyId === r.id}
+                                onClick={() => startGeneratePdfWithRadar(r)}
+                                title="导出雷达PNG→后端异步生成PDF→轮询状态→自动打开下载链接"
+                              >
+                                {busyId === r.id ? "生成中…" : "生成PDF(含雷达图)"}
+                              </button>
+                            ) : null}
                           </div>
                         </div>
 

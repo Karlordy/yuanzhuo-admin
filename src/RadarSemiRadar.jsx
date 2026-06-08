@@ -8,95 +8,96 @@ import React, {
 } from "react";
 import ReactECharts from "echarts-for-react";
 
-/** ---------------- 7维 / 21子项（上4能力=12项；下3限制=9项） ---------------- */
-const TOP_SUBS = [
-  "使命愿景",
-  "战略关注",
-  "取得成果",
-  "系统思考",
-  "平衡",
-  "持续产出",
-  "反思自省",
-  "学习者",
-  "沉着",
-  "关爱",
-  "培育",
-  "团队合作",
-];
+/** ---------------- 新32项优先，旧21项自动兼容 ---------------- */
+const OLD_MODEL = {
+  key: "legacy-21",
+  topGroups: [
+    { name: "成就导向", subs: ["使命愿景", "战略关注", "取得成果"] },
+    { name: "系统意识", subs: ["系统思考", "平衡", "持续产出"] },
+    { name: "自我觉察", subs: ["反思自省", "学习者", "沉着"] },
+    { name: "协同赋能", subs: ["关爱", "培育", "团队合作"] },
+  ],
+  bottomGroups: [
+    { name: "顺从", subs: ["取悦", "被动", "保守"] },
+    { name: "防御", subs: ["傲慢", "距离感", "挑剔"] },
+    { name: "控制", subs: ["完美", "专制", "工作狂"] },
+  ],
+};
 
-const BOTTOM_SUBS = [
-  "取悦",
-  "被动",
-  "保守",
-  "傲慢",
-  "距离感",
-  "挑剔",
-  "完美",
-  "专制",
-  "工作狂",
-];
+const NEW_MODEL = {
+  key: "model-32",
+  topGroups: [
+    { name: "成就导向", subs: ["决断力", "领导效能", "取得成果", "使命愿景", "战略关注"] },
+    { name: "系统意识", subs: ["持续性产出", "关心社会", "平衡", "系统思考", "资源统筹"] },
+    { name: "自我觉察", subs: ["沉着", "反思自省", "无私领导", "学习者", "正直真实"] },
+    { name: "协同赋能", subs: ["关爱", "团队合作", "培育", "人际交往", "协作者"] },
+  ],
+  bottomGroups: [
+    { name: "顺从", subs: ["保守", "被动", "归属", "取悦"] },
+    { name: "防御", subs: ["傲慢", "距离感", "挑剔", "自我辩护"] },
+    { name: "控制", subs: ["工作狂", "完美", "野心", "专制"] },
+  ],
+};
 
-const TOP_DIMS = ["成就导向", "系统意识", "自我觉察", "协同赋能"];
-const BOTTOM_DIMS = ["顺从", "防御", "控制"];
+const OLD_SUBS = [...OLD_MODEL.topGroups, ...OLD_MODEL.bottomGroups].flatMap((dim) => dim.subs);
+const NEW_SUBS = [...NEW_MODEL.topGroups, ...NEW_MODEL.bottomGroups].flatMap((dim) => dim.subs);
+const NEW_ONLY_SUBS = NEW_SUBS.filter((name) => !OLD_SUBS.includes(name));
 
-/** ---------------- 角度：上半180~360(12*15°)，下半0~180(9*20°) ---------------- */
-function buildTopSegments() {
-  const base = 180;
-  const step = 15;
+const SCORE_ALIASES = {
+  持续性产出: ["持续产出"],
+  持续产出: ["持续性产出"],
+};
 
-  // ✅ 每个大维度 45°，刚好 3 个子项（3*15°=45°）
-  return TOP_SUBS.map((name, i) => {
-    const a0 = base + i * step;
-    const a1 = base + (i + 1) * step;
-    const dimIndex = Math.floor(i / 3); // 0..3
-    return {
-      name,
-      a0,
-      a1,
-      mid: (a0 + a1) / 2,
-      group: "top",
-      dimIndex,
-      dimName: TOP_DIMS[dimIndex],
-    };
-  });
-}
-function buildBottomSegments() {
-  const base = 0;
-  const step = 20;
-
-  // ✅ 每个大维度 60°，刚好 3 个子项（3*20°=60°）
-  return BOTTOM_SUBS.map((name, i) => {
-    const a0 = base + i * step;
-    const a1 = base + (i + 1) * step;
-    const dimIndex = Math.floor(i / 3); // 0..2
-    return {
-      name,
-      a0,
-      a1,
-      mid: (a0 + a1) / 2,
-      group: "bottom",
-      dimIndex,
-      dimName: BOTTOM_DIMS[dimIndex],
-    };
-  });
+function pickRadarModel(subScoresMap) {
+  if (!subScoresMap || typeof subScoresMap !== "object") return OLD_MODEL;
+  return NEW_ONLY_SUBS.some((name) => name in subScoresMap) ? NEW_MODEL : OLD_MODEL;
 }
 
-/** 7根分隔线角度（上4下3） */
-const DIM_BOUNDARY_ANGLES = [0, 60, 120, 180, 225, 270, 315];
+function buildSegments(groups, base, span, groupName) {
+  const total = groups.reduce((sum, dim) => sum + dim.subs.length, 0);
+  const step = span / total;
+  let cursor = base;
 
-/** dim 标签角度（段中心） */
-function buildDimLabelAngles() {
-  const top = TOP_DIMS.map((d, i) => {
-    const a0 = 180 + i * 45;
-    const a1 = 180 + (i + 1) * 45;
-    return { name: d, mid: (a0 + a1) / 2, group: "top" };
+  return groups.flatMap((dim, dimIndex) =>
+    dim.subs.map((name) => {
+      const a0 = cursor;
+      const a1 = cursor + step;
+      cursor = a1;
+      return { name, dim: dim.name, dimIndex, a0, a1, mid: (a0 + a1) / 2, group: groupName };
+    })
+  );
+}
+
+function buildBoundaryAngles(bottomGroups, topGroups) {
+  const angles = [];
+  let bottomCursor = 0;
+  const bottomTotal = bottomGroups.reduce((sum, dim) => sum + dim.subs.length, 0);
+  for (const dim of bottomGroups) {
+    angles.push(bottomCursor);
+    bottomCursor += (dim.subs.length / bottomTotal) * 180;
+  }
+
+  let topCursor = 180;
+  const topTotal = topGroups.reduce((sum, dim) => sum + dim.subs.length, 0);
+  for (const dim of topGroups) {
+    angles.push(topCursor);
+    topCursor += (dim.subs.length / topTotal) * 180;
+  }
+
+  return Array.from(new Set(angles.map((a) => Math.round(a * 100) / 100)));
+}
+
+function buildDimLabelAngles(groups, base, span, groupName) {
+  const total = groups.reduce((sum, dim) => sum + dim.subs.length, 0);
+  let cursor = base;
+
+  return groups.map((dim) => {
+    const dimSpan = (dim.subs.length / total) * span;
+    const a0 = cursor;
+    const a1 = cursor + dimSpan;
+    cursor = a1;
+    return { name: dim.name, mid: (a0 + a1) / 2, group: groupName };
   });
-  const bottom = BOTTOM_DIMS.map((d, i) => {
-    const a0 = 0 + i * 60;
-    const a1 = 0 + (i + 1) * 60;
-    return { name: d, mid: (a0 + a1) / 2, group: "bottom" };
-  });
-  return [...top, ...bottom];
 }
 
 /** ---------------- 工具 ---------------- */
@@ -115,6 +116,9 @@ function fmt2(v) {
 function getSubScore(subScoresMap, subName) {
   if (!subScoresMap) return null;
   if (subName in subScoresMap) return toNum(subScoresMap[subName]);
+  for (const alias of SCORE_ALIASES[subName] || []) {
+    if (alias in subScoresMap) return toNum(subScoresMap[alias]);
+  }
   return null;
 }
 
@@ -137,6 +141,18 @@ function polarPixel(coordSys, val0to5, angleDeg, innerRatio = 0.06) {
 
 function sideByUnitX(ux) {
   return ux >= 0 ? "right" : "left";
+}
+
+/** 高亮规则：上半球取最小3；下半球取最大3 */
+function topMin3Names(items) {
+  const top = items.filter((x) => x.group === "top");
+  const sorted = [...top].sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
+  return new Set(sorted.slice(0, 3).map((x) => x.name));
+}
+function bottomMax3Names(items) {
+  const bottom = items.filter((x) => x.group === "bottom");
+  const sorted = [...bottom].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return new Set(sorted.slice(0, 3).map((x) => x.name));
 }
 
 /** 子项微调 */
@@ -180,53 +196,70 @@ function nudgeFor(name) {
   };
 }
 
-/** ---------------- 导出 PNG 相关工具 ---------------- */
+/** ---------------- 导出 PNG：给父组件 ref / onReady 两种方式同时支持 ---------------- */
 function createExportApi(chartRef) {
   const exportPng = (opts = {}) => {
     const inst = chartRef.current?.getEchartsInstance?.();
     if (!inst) throw new Error("ECharts instance not ready");
+
     const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor } = opts;
-    try { inst.resize?.(); } catch {}
+
+    try {
+      inst.resize?.();
+    } catch {}
+
     const payload = {
       type: "png",
       pixelRatio,
       excludeComponents,
-      ...(backgroundColor != null ? { backgroundColor } : {}),
+      ...(backgroundColor != null ? { backgroundColor } : {}), // 不传 => 透明背景
     };
+
     return inst.getDataURL(payload);
   };
 
   const exportPngAsync = (opts = {}) => {
     const inst = chartRef.current?.getEchartsInstance?.();
     if (!inst) return Promise.reject(new Error("ECharts instance not ready"));
+
     const { pixelRatio = 2, excludeComponents = ["toolbox"], backgroundColor, timeoutMs = 3000 } = opts;
 
     return new Promise((resolve, reject) => {
       let done = false;
+
       const finish = () => {
         if (done) return;
         done = true;
-        try { inst.off?.("finished", finish); } catch {}
+        try {
+          inst.off?.("finished", finish);
+        } catch {}
+
         try {
           inst.resize?.();
           const payload = {
             type: "png",
             pixelRatio,
             excludeComponents,
-            ...(backgroundColor != null ? { backgroundColor } : {}),
+            ...(backgroundColor != null ? { backgroundColor } : {}), // 不传 => 透明背景
           };
-          resolve(inst.getDataURL(payload));
+          const url = inst.getDataURL(payload);
+          resolve(url);
         } catch (e) {
           reject(e);
         }
       };
 
-      try { inst.on?.("finished", finish); } catch {}
+      try {
+        inst.on?.("finished", finish);
+      } catch {}
+
       requestAnimationFrame(() => requestAnimationFrame(finish));
 
       setTimeout(() => {
         if (!done) {
-          try { inst.off?.("finished", finish); } catch {}
+          try {
+            inst.off?.("finished", finish);
+          } catch {}
           reject(new Error("exportPngAsync timeout"));
         }
       }, timeoutMs);
@@ -236,57 +269,80 @@ function createExportApi(chartRef) {
   return { exportPng, exportPngAsync };
 }
 
-const RadarSemiRadar = forwardRef(function RadarSemiRadar(
-  { subScores, dimScores, onReady },
-  ref
-) {
+/** ✅ forwardRef：父组件可直接 radarRef.current.exportPng() */
+const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores, onReady }, ref) {
   if (!subScores || !dimScores) return null;
 
   const chartRef = useRef(null);
+
   useImperativeHandle(ref, () => createExportApi(chartRef), []);
 
   const segments = useMemo(() => {
-    const all = [...buildTopSegments(), ...buildBottomSegments()];
+    const model = pickRadarModel(subScores);
+    const all = [
+      ...buildSegments(model.topGroups, 180, 180, "top"),
+      ...buildSegments(model.bottomGroups, 0, 180, "bottom"),
+    ];
     return all.map((seg) => {
       const sc = getSubScore(subScores, seg.name);
       return { ...seg, score: sc == null ? 0 : sc };
     });
   }, [subScores]);
 
-  const R_SCORE = 4.2;
-  const R_TEXT = 4.65;
-  const R_DIM = 2.45;
-  const SCORE_OUT_PX = 10;
-  const TEXT_OUT_PX = 24;
+  const hiTopMin3 = useMemo(() => topMin3Names(segments), [segments]);
+  const hiBottomMax3 = useMemo(() => bottomMax3Names(segments), [segments]);
+
+  const isNewRadar = segments.length > 21;
+  const R_SCORE = isNewRadar ? 4.18 : 4.2;
+  const R_TEXT = isNewRadar ? 4.72 : 4.65;
+  const R_DIM = isNewRadar ? 2.35 : 2.45;
+  const SCORE_OUT_PX = isNewRadar ? 6 : 10;
+  const TEXT_OUT_PX = isNewRadar ? 14 : 24;
 
   const option = useMemo(() => {
-    /**
-     * 🎨 高级“同色系渐变档位”
-     * - 不用特别跳的纯色，用「低饱和、统一基色、不同透明度」来做深浅层次
-     * - 你要的是“维度块一眼可分”，所以按 dimIndex 分档即可
-     */
     const TOP_DIM_FILLS = [
-      "rgba(37, 99, 235, 0.18)", // 成就导向（最浅蓝）
-      "rgba(37, 99, 235, 0.26)", // 系统意识
-      "rgba(37, 99, 235, 0.34)", // 自我觉察
-      "rgba(37, 99, 235, 0.42)", // 协同赋能（最深蓝）
+      "rgba(37, 99, 235, 0.18)",
+      "rgba(37, 99, 235, 0.26)",
+      "rgba(37, 99, 235, 0.34)",
+      "rgba(37, 99, 235, 0.42)",
     ];
-
+    const TOP_DIM_FILLS_HI = [
+      "rgba(30, 64, 175, 0.38)",
+      "rgba(30, 64, 175, 0.46)",
+      "rgba(30, 64, 175, 0.54)",
+      "rgba(30, 64, 175, 0.62)",
+    ];
     const BOT_DIM_FILLS = [
-      "rgba(132, 204, 22, 0.18)", // 顺从（最浅绿）
-      "rgba(132, 204, 22, 0.28)", // 防御
-      "rgba(132, 204, 22, 0.38)", // 控制（最深绿）
+      "rgba(132, 204, 22, 0.18)",
+      "rgba(132, 204, 22, 0.28)",
+      "rgba(132, 204, 22, 0.38)",
     ];
-
-    const EDGE = "rgba(15, 23, 42, 0.55)";
+    const BOT_DIM_FILLS_HI = [
+      "rgba(77, 124, 15, 0.38)",
+      "rgba(77, 124, 15, 0.50)",
+      "rgba(77, 124, 15, 0.62)",
+    ];
+    const EDGE = "rgba(15, 23, 42, .55)";
     const DIVIDER_LEN = 1;
 
-    const dimAngles = buildDimLabelAngles();
+    const model = pickRadarModel(subScores);
+    const dimAngles = [
+      ...buildDimLabelAngles(model.topGroups, 180, 180, "top"),
+      ...buildDimLabelAngles(model.bottomGroups, 0, 180, "bottom"),
+    ];
+    const dimBoundaryAngles = buildBoundaryAngles(model.bottomGroups, model.topGroups);
+    const scoreFontSize = isNewRadar ? 18 : 26;
+    const subFontSize = isNewRadar ? 16 : 24;
+    const dimFontSize = isNewRadar ? 23 : 28;
+    const dimLineHeight = isNewRadar ? 24 : 28;
 
     return {
       animation: false,
       legend: { show: false },
+
+      // ✅ 关键修改：radius 调到 85%
       polar: { center: ["50%", "52%"], radius: "87%" },
+
       angleAxis: {
         type: "value",
         min: 0,
@@ -298,6 +354,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
         axisLabel: { show: false },
         splitLine: { show: false },
       },
+
       radiusAxis: {
         min: 0,
         max: 5,
@@ -305,10 +362,9 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: { show: false },
-        splitLine: {
-          lineStyle: { type: "dashed", color: "rgba(148,163,184,.55)" },
-        },
+        splitLine: { lineStyle: { type: "dashed", color: "rgba(148,163,184,.55)" } },
       },
+
       series: [
         // ① 扇形
         {
@@ -329,16 +385,13 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
 
             const score = typeof d.score === "number" ? d.score : 0;
             const r0 = Math.max(10, rMax * 0.06);
-            const r1 =
-              r0 +
-              (Math.max(0, Math.min(5, score)) / 5) * (rMax - r0);
+            const r1 = r0 + (Math.max(0, Math.min(5, score)) / 5) * (rMax - r0);
 
             const isTop = d.group === "top";
-
-            // ✅ 关键：按大维度分档（渐变深浅）
+            const isHi = (isTop && hiTopMin3.has(d.name)) || (!isTop && hiBottomMax3.has(d.name));
             const fill = isTop
-              ? (TOP_DIM_FILLS[d.dimIndex] || TOP_DIM_FILLS[0])
-              : (BOT_DIM_FILLS[d.dimIndex] || BOT_DIM_FILLS[0]);
+              ? (isHi ? TOP_DIM_FILLS_HI[d.dimIndex] : TOP_DIM_FILLS[d.dimIndex]) || TOP_DIM_FILLS[0]
+              : (isHi ? BOT_DIM_FILLS_HI[d.dimIndex] : BOT_DIM_FILLS[d.dimIndex]) || BOT_DIM_FILLS[0];
 
             const a0 = Math.PI - (d.a0 * Math.PI) / 180;
             const a1 = Math.PI - (d.a1 * Math.PI) / 180;
@@ -351,22 +404,28 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
           },
         },
 
-        // ② 分隔线
+        // ② 分隔线 (🟢 修改处：延长水平线)
         {
           type: "custom",
           coordinateSystem: "polar",
           z: 2,
           clip: false,
-          data: DIM_BOUNDARY_ANGLES,
+          data: dimBoundaryAngles,
+          tooltip: { show: false },
           renderItem: (params) => {
             const coordSys = params.coordSys;
             if (!coordSys) return null;
-            const angDeg = DIM_BOUNDARY_ANGLES[params.dataIndex] ?? 0;
+
+            const angDeg = dimBoundaryAngles[params.dataIndex] ?? 0;
             const cx = coordSys.cx;
             const cy = coordSys.cy;
+
+            // 🟢 修改逻辑：如果是 0° 或 180°（水平线），则倍数设为 1.15，否则 1.0
             const isHorizontal = angDeg === 0 || angDeg === 180;
             const lenFactor = isHorizontal ? 1.15 : DIVIDER_LEN;
+
             const r = coordSys.r * lenFactor;
+
             const a = (angDeg * Math.PI) / 180;
             const x = cx + -Math.cos(a) * r;
             const y = cy + Math.sin(a) * r;
@@ -386,28 +445,27 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
           z: 10,
           clip: false,
           data: segments,
+          tooltip: { show: false },
           renderItem: (params) => {
             const d = segments[params.dataIndex];
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
+
             const n = nudgeFor(d.name);
             const ang = d.mid + n.da;
             const rVal = R_SCORE + n.drScore;
+
             const p = polarPixel(coordSys, rVal, ang);
             const side = sideByUnitX(p.ux);
 
             return {
               type: "text",
               style: {
-                x:
-                  p.x +
-                  p.ux * SCORE_OUT_PX +
-                  (side === "right" ? 6 : -6) +
-                  n.dxScore,
+                x: p.x + p.ux * SCORE_OUT_PX + (side === "right" ? 6 : -6) + n.dxScore,
                 y: p.y + p.uy * SCORE_OUT_PX + n.dyScore,
                 text: fmt2(d.score),
                 fill: "#0f172a",
-                fontSize: 26,
+                fontSize: scoreFontSize,
                 fontWeight: 700,
                 textAlign: side === "right" ? "left" : "right",
                 textVerticalAlign: "middle",
@@ -423,28 +481,27 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
           z: 11,
           clip: false,
           data: segments,
+          tooltip: { show: false },
           renderItem: (params) => {
             const d = segments[params.dataIndex];
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
+
             const n = nudgeFor(d.name);
             const ang = d.mid + n.da;
             const rVal = R_TEXT + n.drText;
+
             const p = polarPixel(coordSys, rVal, ang);
             const side = sideByUnitX(p.ux);
 
             return {
               type: "text",
               style: {
-                x:
-                  p.x +
-                  p.ux * TEXT_OUT_PX +
-                  (side === "right" ? 8 : -8) +
-                  n.dxText,
+                x: p.x + p.ux * TEXT_OUT_PX + (side === "right" ? 8 : -8) + n.dxText,
                 y: p.y + p.uy * TEXT_OUT_PX + n.dyText,
                 text: d.name,
                 fill: "#334155",
-                fontSize: 24,
+                fontSize: subFontSize,
                 textAlign: side === "right" ? "left" : "right",
                 textVerticalAlign: "middle",
               },
@@ -459,12 +516,15 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
           z: 12,
           clip: false,
           data: dimAngles,
+          tooltip: { show: false },
           renderItem: (params) => {
             const d = dimAngles[params.dataIndex];
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
+
             const p = polarPixel(coordSys, R_DIM, d.mid);
             const score = dimScores?.[d.name];
+
             return {
               type: "text",
               style: {
@@ -472,9 +532,9 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
                 y: p.y,
                 text: `${d.name}\n${fmt2(score)}`,
                 fill: "#0f172a",
-                fontSize: 28,
+                fontSize: dimFontSize,
                 fontWeight: 800,
-                lineHeight: 28,
+                lineHeight: dimLineHeight,
                 textAlign: "center",
                 textVerticalAlign: "middle",
               },
@@ -483,8 +543,9 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar(
         },
       ],
     };
-  }, [segments, dimScores]);
+  }, [segments, subScores, dimScores, hiTopMin3, hiBottomMax3, isNewRadar]);
 
+  // 继续支持 onReady(api)
   useEffect(() => {
     if (typeof onReady !== "function") return;
     const api = createExportApi(chartRef);

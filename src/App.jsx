@@ -42,6 +42,74 @@ function normalizeSubName(name) {
   return s;
 }
 
+const RADAR32_GROUPS = [
+  { dim: "成就导向", subs: ["决断力", "领导效能", "取得成果", "使命愿景", "战略关注"] },
+  { dim: "系统意识", subs: ["持续性产出", "关心社会", "平衡", "系统思考", "资源统筹"] },
+  { dim: "自我觉察", subs: ["沉着", "反思自省", "无私领导", "学习者", "正直真实"] },
+  { dim: "协同赋能", subs: ["关爱", "团队合作", "培育", "人际交往", "协作者"] },
+  { dim: "控制", subs: ["工作狂", "完美", "野心", "专制"] },
+  { dim: "防御", subs: ["傲慢", "距离感", "挑剔", "自我辩护"] },
+  { dim: "顺从", subs: ["保守", "被动", "归属", "取悦"] },
+];
+
+const RADAR32_NEW_ONLY = [
+  "决断力",
+  "领导效能",
+  "持续性产出",
+  "关心社会",
+  "资源统筹",
+  "无私领导",
+  "正直真实",
+  "人际交往",
+  "协作者",
+  "野心",
+  "自我辩护",
+  "归属",
+];
+
+function avg(nums) {
+  const vals = nums.filter((n) => typeof n === "number" && Number.isFinite(n));
+  if (!vals.length) return null;
+  return toFixed2(vals.reduce((sum, n) => sum + n, 0) / vals.length);
+}
+
+function getAnswerScore(answers, qNumber) {
+  if (!answers || typeof answers !== "object") return null;
+  const padded = `Q${String(qNumber).padStart(3, "0")}`;
+  const raw =
+    answers[String(qNumber)] ??
+    answers[qNumber] ??
+    answers[padded] ??
+    answers[padded.toLowerCase()];
+  return toFixed2(raw);
+}
+
+function buildModel32ScoreMapsFromAnswers(answers) {
+  if (!answers || typeof answers !== "object") return null;
+
+  const subMap = {};
+  const dimMap = {};
+  let q = 1;
+  let scoredSubCount = 0;
+
+  for (const group of RADAR32_GROUPS) {
+    const dimVals = [];
+    for (const sub of group.subs) {
+      const score = avg([getAnswerScore(answers, q), getAnswerScore(answers, q + 1), getAnswerScore(answers, q + 2)]);
+      q += 3;
+      if (score != null) {
+        subMap[sub] = score;
+        dimVals.push(score);
+        scoredSubCount += 1;
+      }
+    }
+    dimMap[group.dim] = avg(dimVals);
+  }
+
+  if (scoredSubCount < 32) return null;
+  return { subMap, dimMap };
+}
+
 function buildScoreMapsFromSnapshot(snapshot) {
   const rawSubs = snapshot?.subscores;
   const rawDims = snapshot?.dimscores;
@@ -78,7 +146,27 @@ function buildScoreMapsFromSnapshot(snapshot) {
     }
   }
 
+  const computed32 = buildModel32ScoreMapsFromAnswers(snapshot?.answers_adjusted || snapshot?.answers_raw);
+  const hasModel32 = RADAR32_NEW_ONLY.some((name) => Object.prototype.hasOwnProperty.call(subMap, name));
+  if (computed32 && !hasModel32) return computed32;
+
   return { subMap, dimMap };
+}
+
+function buildSnapshotFromSubmission(s) {
+  if (!s) return {};
+  return {
+    name: s.name,
+    company: s.company,
+    submission_created_at: s.created_at,
+    answers_raw: s.answers_raw ?? null,
+    answers_adjusted: s.answers_adjusted ?? null,
+    subscores: s.subscores ?? null,
+    dimscores: s.dimscores ?? null,
+    focus_low3: s.focus_low3 ?? null,
+    focus_high2: s.focus_high2 ?? null,
+    insight_text: s.insight_text ?? null,
+  };
 }
 
 function sanitizeFileName(name) {
@@ -214,7 +302,7 @@ export default function App() {
     try {
       const { data, error } = await supabase
         .from("submissions")
-        .select("id, created_at, name, company, insight_text, subscores, dimscores, focus_low3, focus_high2")
+        .select("id, created_at, name, company, answers_raw, answers_adjusted, insight_text, subscores, dimscores, focus_low3, focus_high2")
         .order("created_at", { ascending: false })
         .limit(200);
 
@@ -300,16 +388,7 @@ export default function App() {
       const existing = reportBySubmissionId.get(s.id);
       if (existing) return;
 
-      const snapshot = {
-        name: s.name,
-        company: s.company,
-        submission_created_at: s.created_at,
-        subscores: s.subscores ?? null,
-        dimscores: s.dimscores ?? null,
-        focus_low3: s.focus_low3 ?? null,
-        focus_high2: s.focus_high2 ?? null,
-        insight_text: s.insight_text ?? null,
-      };
+      const snapshot = buildSnapshotFromSubmission(s);
 
       const displayFileName = `${s.name || "姓名"}-${s.company || "公司"}-领导力测评报告.pdf`;
 
@@ -440,13 +519,14 @@ export default function App() {
 
   // ✅ 点击“生成PDF(含雷达图)”：启动隐藏雷达 job
   function startGeneratePdfWithRadar(reportRow) {
-    const snap = reportRow?.snapshot || {};
-    if (!snap?.subscores || !snap?.dimscores) {
-      alert("该报告 snapshot 里没有测评数据，无法生成雷达图");
+    const liveSubmission = subs.find((s) => s?.id === reportRow?.submission_id);
+    const snap = liveSubmission ? buildSnapshotFromSubmission(liveSubmission) : reportRow?.snapshot || {};
+    const { subMap, dimMap } = buildScoreMapsFromSnapshot(snap);
+    if (!Object.keys(subMap).length || !Object.keys(dimMap).length) {
+      alert("该报告没有可用于雷达图的测评数据，无法生成雷达图");
       return;
     }
 
-    const { subMap, dimMap } = buildScoreMapsFromSnapshot(snap);
     const title = `${snap.name || ""}-${snap.company || ""}`.trim() || "雷达图";
 
     setBusyId(reportRow.id);
@@ -757,7 +837,8 @@ export default function App() {
                   <div style={{ color: "#64748b", fontSize: 12 }}>暂无报告（先去 Submissions 创建报告记录）</div>
                 ) : (
                   reports.map((r) => {
-                    const snap = r.snapshot || {};
+                    const liveSubmission = subs.find((s) => s?.id === r?.submission_id);
+                    const snap = liveSubmission ? buildSnapshotFromSubmission(liveSubmission) : r.snapshot || {};
                     const canPreviewRadar =
                       (Array.isArray(snap?.subscores) && snap.subscores.length > 0) &&
                       (snap?.dimscores && (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object"));
@@ -776,12 +857,12 @@ export default function App() {
                                 style={btn}
                                 disabled={busyId === r.id}
                                 onClick={() => {
-                                  const { subMap, dimMap } = buildScoreMapsFromSnapshot(r.snapshot);
+                                  const { subMap, dimMap } = buildScoreMapsFromSnapshot(snap);
                                   radarApiRef.current = null;
                                   setPreview({
                                     reportId: r.id,
                                     submissionId: r.submission_id,
-                                    snapshot: r.snapshot,
+                                    snapshot: snap,
                                     subMap,
                                     dimMap,
                                     title: `${snap.name || ""}-${snap.company || ""}`.trim(),

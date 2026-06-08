@@ -293,11 +293,11 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
   const hiBottomMax3 = useMemo(() => bottomMax3Names(segments), [segments]);
 
   const isNewRadar = segments.length > 21;
-  const R_SCORE = isNewRadar ? 4.18 : 4.2;
-  const R_TEXT = isNewRadar ? 4.72 : 4.65;
+  const R_SCORE = isNewRadar ? 4.26 : 4.2;
+  const R_TEXT = isNewRadar ? 4.82 : 4.65;
   const R_DIM = isNewRadar ? 2.35 : 2.45;
-  const SCORE_OUT_PX = isNewRadar ? 6 : 10;
-  const TEXT_OUT_PX = isNewRadar ? 14 : 24;
+  const SCORE_OUT_PX = isNewRadar ? 8 : 10;
+  const TEXT_OUT_PX = isNewRadar ? 20 : 24;
 
   const option = useMemo(() => {
     const TOP_DIM_FILLS = [
@@ -451,7 +451,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
 
-            const n = nudgeFor(d.name);
+            const n = isNewRadar ? nudgeFor("") : nudgeFor(d.name);
             const ang = d.mid + n.da;
             const rVal = R_SCORE + n.drScore;
 
@@ -461,7 +461,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             return {
               type: "text",
               style: {
-                x: p.x + p.ux * SCORE_OUT_PX + (side === "right" ? 6 : -6) + n.dxScore,
+                x: p.x + p.ux * SCORE_OUT_PX + (isNewRadar ? 0 : side === "right" ? 6 : -6) + n.dxScore,
                 y: p.y + p.uy * SCORE_OUT_PX + n.dyScore,
                 text: fmt2(d.score),
                 fill: "#0f172a",
@@ -487,7 +487,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
 
-            const n = nudgeFor(d.name);
+            const n = isNewRadar ? nudgeFor("") : nudgeFor(d.name);
             const ang = d.mid + n.da;
             const rVal = R_TEXT + n.drText;
 
@@ -497,7 +497,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             return {
               type: "text",
               style: {
-                x: p.x + p.ux * TEXT_OUT_PX + (side === "right" ? 8 : -8) + n.dxText,
+                x: p.x + p.ux * TEXT_OUT_PX + (isNewRadar ? 0 : side === "right" ? 8 : -8) + n.dxText,
                 y: p.y + p.uy * TEXT_OUT_PX + n.dyText,
                 text: d.name,
                 fill: "#334155",

@@ -53,13 +53,13 @@ function pickRadarModel(subScoresMap) {
   return NEW_ONLY_SUBS.some((name) => name in subScoresMap) ? NEW_MODEL : OLD_MODEL;
 }
 
-function buildSegments(groups, base, span, groupName) {
+function buildSegments(groups, base, span, groupName, reverseSubs = false) {
   const total = groups.reduce((sum, dim) => sum + dim.subs.length, 0);
   const step = span / total;
   let cursor = base;
 
   return groups.flatMap((dim, dimIndex) =>
-    dim.subs.map((name) => {
+    (reverseSubs ? [...dim.subs].reverse() : dim.subs).map((name) => {
       const a0 = cursor;
       const a1 = cursor + step;
       cursor = a1;
@@ -292,9 +292,10 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
 
   const segments = useMemo(() => {
     const model = pickRadarModel(subScores);
+    const reverseSubs = model.key === "model-32";
     const all = [
-      ...buildSegments(model.topGroups, 180, 180, "top"),
-      ...buildSegments(model.bottomGroups, 0, 180, "bottom"),
+      ...buildSegments(model.topGroups, 180, 180, "top", reverseSubs),
+      ...buildSegments(model.bottomGroups, 0, 180, "bottom", reverseSubs),
     ];
     return all.map((seg) => {
       const sc = getSubScore(subScores, seg.name);

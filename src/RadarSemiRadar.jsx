@@ -100,6 +100,19 @@ function buildDimLabelAngles(groups, base, span, groupName) {
   });
 }
 
+function buildDimSectors(groups, base, span, groupName) {
+  const total = groups.reduce((sum, dim) => sum + dim.subs.length, 0);
+  let cursor = base;
+
+  return groups.map((dim) => {
+    const dimSpan = (dim.subs.length / total) * span;
+    const a0 = cursor;
+    const a1 = cursor + dimSpan;
+    cursor = a1;
+    return { name: dim.name, a0, a1, mid: (a0 + a1) / 2, group: groupName };
+  });
+}
+
 /** ---------------- 工具 ---------------- */
 function toNum(v) {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -323,12 +336,17 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
       "rgba(77, 124, 15, 0.62)",
     ];
     const EDGE = "rgba(15, 23, 42, .55)";
+    const DIM_AVG_OUTLINE = "#c00000";
     const DIVIDER_LEN = 1;
 
     const model = pickRadarModel(subScores);
     const dimAngles = [
       ...buildDimLabelAngles(model.topGroups, 180, 180, "top"),
       ...buildDimLabelAngles(model.bottomGroups, 0, 180, "bottom"),
+    ];
+    const dimSectors = [
+      ...buildDimSectors(model.topGroups, 180, 180, "top"),
+      ...buildDimSectors(model.bottomGroups, 0, 180, "bottom"),
     ];
     const dimBoundaryAngles = buildBoundaryAngles(model.bottomGroups, model.topGroups);
     const scoreFontSize = isNewRadar ? 18 : 26;
@@ -404,7 +422,42 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           },
         },
 
-        // ② 分隔线 (🟢 修改处：延长水平线)
+        // ② 7大维度平均分描边
+        {
+          name: "维度平均分描边",
+          type: "custom",
+          coordinateSystem: "polar",
+          z: 8,
+          clip: false,
+          data: dimSectors,
+          tooltip: { show: false },
+          renderItem: (params) => {
+            const d = dimSectors[params.dataIndex];
+            const coordSys = params.coordSys;
+            if (!d || !coordSys) return null;
+
+            const cx = coordSys.cx;
+            const cy = coordSys.cy;
+            const rMax = coordSys.r;
+            const score = toNum(dimScores?.[d.name]) ?? 0;
+            const r = (Math.max(0, Math.min(5, score)) / 5) * rMax;
+            const startAngle = Math.PI - (d.a1 * Math.PI) / 180;
+            const endAngle = Math.PI - (d.a0 * Math.PI) / 180;
+
+            return {
+              type: "sector",
+              shape: { cx, cy, r0: 0, r, startAngle, endAngle },
+              style: {
+                fill: "rgba(0,0,0,0)",
+                stroke: DIM_AVG_OUTLINE,
+                lineWidth: isNewRadar ? 5 : 4,
+              },
+              silent: true,
+            };
+          },
+        },
+
+        // ③ 分隔线 (🟢 修改处：延长水平线)
         {
           type: "custom",
           coordinateSystem: "polar",
@@ -438,7 +491,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           },
         },
 
-        // ③ 分数文字
+        // ④ 分数文字
         {
           type: "custom",
           coordinateSystem: "polar",
@@ -474,7 +527,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           },
         },
 
-        // ④ 子项文字
+        // ⑤ 子项文字
         {
           type: "custom",
           coordinateSystem: "polar",
@@ -509,7 +562,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
           },
         },
 
-        // ⑤ 维度文字
+        // ⑥ 维度文字
         {
           type: "custom",
           coordinateSystem: "polar",

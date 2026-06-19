@@ -27,15 +27,15 @@ const OLD_MODEL = {
 const NEW_MODEL = {
   key: "model-32",
   topGroups: [
-    { name: "成就导向", subs: ["决断力", "领导效能", "取得成果", "使命愿景", "战略关注"] },
-    { name: "系统意识", subs: ["持续性产出", "关心社会", "平衡", "系统思考", "资源统筹"] },
-    { name: "自我觉察", subs: ["沉着", "反思自省", "无私领导", "学习者", "正直真实"] },
-    { name: "协同赋能", subs: ["关爱", "团队合作", "培育", "人际交往", "协作者"] },
+    { name: "成就导向", subs: ["战略关注", "使命愿景", "取得成果", "领导效能", "决断力"] },
+    { name: "系统意识", subs: ["资源统筹", "系统思考", "平衡", "关心社会", "持续性产出"] },
+    { name: "自我觉察", subs: ["正直真实", "学习者", "无私领导", "反思自省", "沉着"] },
+    { name: "协同赋能", subs: ["协作者", "人际交往", "培育", "团队合作", "关爱"] },
   ],
   bottomGroups: [
-    { name: "顺从", subs: ["保守", "被动", "归属", "取悦"] },
-    { name: "防御", subs: ["傲慢", "距离感", "挑剔", "自我辩护"] },
-    { name: "控制", subs: ["工作狂", "完美", "野心", "专制"] },
+    { name: "顺从", subs: ["取悦", "归属", "被动", "保守"] },
+    { name: "防御", subs: ["自我辩护", "挑剔", "距离感", "傲慢"] },
+    { name: "控制", subs: ["专制", "野心", "完美", "工作狂"] },
   ],
 };
 
@@ -53,13 +53,13 @@ function pickRadarModel(subScoresMap) {
   return NEW_ONLY_SUBS.some((name) => name in subScoresMap) ? NEW_MODEL : OLD_MODEL;
 }
 
-function buildSegments(groups, base, span, groupName, reverseSubs = false) {
+function buildSegments(groups, base, span, groupName) {
   const total = groups.reduce((sum, dim) => sum + dim.subs.length, 0);
   const step = span / total;
   let cursor = base;
 
   return groups.flatMap((dim, dimIndex) =>
-    (reverseSubs ? [...dim.subs].reverse() : dim.subs).map((name) => {
+    dim.subs.map((name) => {
       const a0 = cursor;
       const a1 = cursor + step;
       cursor = a1;
@@ -292,10 +292,9 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
 
   const segments = useMemo(() => {
     const model = pickRadarModel(subScores);
-    const reverseSubs = model.key === "model-32";
     const all = [
-      ...buildSegments(model.topGroups, 180, 180, "top", reverseSubs),
-      ...buildSegments(model.bottomGroups, 0, 180, "bottom", reverseSubs),
+      ...buildSegments(model.topGroups, 180, 180, "top"),
+      ...buildSegments(model.bottomGroups, 0, 180, "bottom"),
     ];
     return all.map((seg) => {
       const sc = getSubScore(subScores, seg.name);

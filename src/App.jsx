@@ -1185,6 +1185,18 @@ export default function App() {
                               </button>
                             ) : null}
 
+                            {r.status === "done" && r.pdf_path ? (
+                              <button
+                                type="button"
+                                style={btn}
+                                disabled={busyId === r.id}
+                                onClick={() => startGeneratePdfWithRadar(r)}
+                                title="重新导出当前雷达PNG，并覆盖生成新版PDF"
+                              >
+                                {busyId === r.id ? "生成中…" : "重新生成PDF"}
+                              </button>
+                            ) : null}
+
                             {r.status !== "done" || !r.pdf_path ? (
                               <button
                                 type="button"

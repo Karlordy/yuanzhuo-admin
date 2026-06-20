@@ -196,6 +196,20 @@ const SUB_NUDGE = {
   工作狂: { da: 0, drText: 0, drScore: 0, dxText: 4, dyText: 0, dxScore: 0, dyScore: 0 },
 };
 
+const NEW_SUB_LABEL_NUDGE = {
+  资源统筹: { dxText: -20, dyText: 6 },
+  系统思考: { dxText: -18, dyText: 4 },
+  平衡: { dxText: -16, dyText: 2 },
+  关心社会: { dxText: -16, dyText: -4 },
+  持续性产出: { dxText: -18, dyText: -10 },
+
+  正直真实: { dxText: 18, dyText: -10 },
+  学习者: { dxText: 16, dyText: -4 },
+  无私领导: { dxText: 16, dyText: 2 },
+  反思自省: { dxText: 18, dyText: 4 },
+  沉着: { dxText: 20, dyText: 6 },
+};
+
 function nudgeFor(name) {
   const n = SUB_NUDGE[name] || {};
   return {
@@ -206,6 +220,14 @@ function nudgeFor(name) {
     dyText: n.dyText ?? n.dy ?? 0,
     dxScore: n.dxScore || 0,
     dyScore: n.dyScore || 0,
+  };
+}
+
+function newSubLabelNudgeFor(name) {
+  const n = NEW_SUB_LABEL_NUDGE[name] || {};
+  return {
+    dxText: n.dxText || 0,
+    dyText: n.dyText || 0,
   };
 }
 
@@ -540,7 +562,7 @@ const RadarSemiRadar = forwardRef(function RadarSemiRadar({ subScores, dimScores
             const coordSys = params.coordSys;
             if (!d || !coordSys) return null;
 
-            const n = isNewRadar ? nudgeFor("") : nudgeFor(d.name);
+            const n = isNewRadar ? { ...nudgeFor(""), ...newSubLabelNudgeFor(d.name) } : nudgeFor(d.name);
             const ang = d.mid + n.da;
             const rVal = R_TEXT + n.drText;
 

@@ -47,3 +47,15 @@ export function batchDownloadReports(token, reportIds) {
     body: { report_ids: reportIds },
   });
 }
+
+export function listRetestAllowances(token) {
+  return apiJson("/admin/retest-allowances", { token });
+}
+
+export function allowRetest(token, payload) {
+  return apiJson("/admin/retest-allowances", {
+    method: "POST",
+    token,
+    body: payload,
+  });
+}

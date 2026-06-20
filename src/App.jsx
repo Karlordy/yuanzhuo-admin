@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import RadarSemiRadar from "./RadarSemiRadar";
 import ReportTemplate from "./ReportTemplate.jsx";
 import { reportGenerateAsync, reportSignedUrl, waitReportDone } from "./lib/reportApi.js";
-import { batchDownloadReports, createAdminUser, disableAdminUser, listAdminUsers } from "./lib/adminApi.js";
+import { allowRetest, batchDownloadReports, createAdminUser, disableAdminUser, listAdminUsers, listRetestAllowances } from "./lib/adminApi.js";
 
 
 window.supabase = supabase;
@@ -258,6 +258,15 @@ export default function App() {
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [newAdminRole, setNewAdminRole] = useState("report_admin");
 
+  // retest allowances
+  const [retestAllowances, setRetestAllowances] = useState([]);
+  const [retestErr, setRetestErr] = useState("");
+  const [retestBusy, setRetestBusy] = useState(false);
+  const [retestName, setRetestName] = useState("");
+  const [retestCompany, setRetestCompany] = useState("");
+  const [retestCount, setRetestCount] = useState(1);
+  const [retestNote, setRetestNote] = useState("");
+
   // preview
   const [preview, setPreview] = useState(null);
   const radarApiRef = useRef(null);
@@ -288,6 +297,8 @@ export default function App() {
       setSelectedReportIds([]);
       setAdminUsers([]);
       setAdminUsersErr("");
+      setRetestAllowances([]);
+      setRetestErr("");
       setPreview(null);
       setPreviewRadarPng(null);
 
@@ -422,12 +433,32 @@ export default function App() {
     }
   }
 
+  async function fetchRetestAllowances() {
+    if (!session?.user?.id) return;
+    if (!adminRow || adminRow.blocked || adminRow.role !== "system_admin") return;
+
+    setRetestBusy(true);
+    setRetestErr("");
+    try {
+      const token = await getAccessTokenOrThrow();
+      const data = await listRetestAllowances(token);
+      setRetestAllowances(data?.allowances || []);
+    } catch (e) {
+      setRetestErr(e?.message || String(e));
+    } finally {
+      setRetestBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (!session?.user?.id) return;
     if (!adminRow || adminRow.blocked) return;
     fetchSubmissions();
     fetchReports();
-    if (adminRow.role === "system_admin") fetchAdminUsers();
+    if (adminRow.role === "system_admin") {
+      fetchAdminUsers();
+      fetchRetestAllowances();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id, adminRow]);
 
@@ -576,6 +607,30 @@ export default function App() {
       setAdminUsersErr(err?.message || String(err));
     } finally {
       setAdminUsersBusy(false);
+    }
+  }
+
+  async function submitAllowRetest(e) {
+    e.preventDefault();
+    setRetestErr("");
+    setRetestBusy(true);
+    try {
+      const token = await getAccessTokenOrThrow();
+      await allowRetest(token, {
+        real_name: retestName,
+        company: retestCompany,
+        add_count: retestCount,
+        note: retestNote,
+      });
+      setRetestName("");
+      setRetestCompany("");
+      setRetestCount(1);
+      setRetestNote("");
+      await fetchRetestAllowances();
+    } catch (err) {
+      setRetestErr(err?.message || String(err));
+    } finally {
+      setRetestBusy(false);
     }
   }
 
@@ -942,13 +997,21 @@ export default function App() {
               Admin Users
             </button>
           ) : null}
+          {adminRow?.role === "system_admin" ? (
+            <button type="button" style={pill(tab === "retest")} onClick={() => setTab("retest")}>
+              Retest
+            </button>
+          ) : null}
           <button
             type="button"
             style={{ ...btn, marginLeft: "auto" }}
             onClick={() => {
               fetchSubmissions();
               fetchReports();
-              if (adminRow?.role === "system_admin") fetchAdminUsers();
+              if (adminRow?.role === "system_admin") {
+                fetchAdminUsers();
+                fetchRetestAllowances();
+              }
             }}
           >
             刷新
@@ -1100,6 +1163,93 @@ export default function App() {
                     >
                       Disable
                     </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : tab === "retest" ? (
+          <div style={{ ...card, marginTop: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 800 }}>开放重测 / 提交次数额度</div>
+                <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>
+                  默认同一姓名+公司最多提交 5 次。这里每增加 1 次额度，就允许该用户额外提交 1 次，不删除历史报告。
+                </div>
+              </div>
+              <button type="button" style={btn} disabled={retestBusy} onClick={fetchRetestAllowances}>
+                {retestBusy ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+
+            <form onSubmit={submitAllowRetest} style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr 120px 1.4fr 120px", gap: 10, alignItems: "end" }}>
+              <label>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>姓名</div>
+                <input
+                  value={retestName}
+                  onChange={(e) => setRetestName(e.target.value)}
+                  placeholder="例如：张三"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 14 }}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>公司</div>
+                <input
+                  value={retestCompany}
+                  onChange={(e) => setRetestCompany(e.target.value)}
+                  placeholder="必须与问卷填写一致"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 14 }}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>增加次数</div>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={retestCount}
+                  onChange={(e) => setRetestCount(e.target.value)}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 14 }}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>备注</div>
+                <input
+                  value={retestNote}
+                  onChange={(e) => setRetestNote(e.target.value)}
+                  placeholder="例如：教练确认重测"
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 14 }}
+                />
+              </label>
+              <button type="submit" style={btnPrimary} disabled={retestBusy}>
+                开放重测
+              </button>
+            </form>
+
+            {retestErr ? <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>{retestErr}</div> : null}
+
+            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+              {retestAllowances.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: 12 }}>暂无重测额度记录。</div>
+              ) : (
+                retestAllowances.map((row) => (
+                  <div key={row.id || `${row.real_name}-${row.company}`} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                      <div style={{ fontWeight: 800 }}>
+                        {row.real_name || "-"} ｜ {row.company || "-"}
+                      </div>
+                      <div style={{ color: row.remaining_submissions > 0 ? "#047857" : "#b91c1c", fontSize: 12, fontWeight: 800 }}>
+                        剩余可提交：{row.remaining_submissions ?? "-"} 次
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 6, color: "#64748b", fontSize: 12, lineHeight: 1.7 }}>
+                      已提交：{row.submission_count ?? 0} 次 ｜ 基础上限：{row.base_limit ?? 5} 次 ｜ 额外开放：{row.extra_allowed ?? 0} 次 ｜ 当前总上限：
+                      {row.max_submissions ?? "-"} 次
+                      <br />
+                      状态：{row.is_active ? "active" : "disabled"} ｜ updated_at：{row.updated_at ? new Date(row.updated_at).toLocaleString() : "-"}
+                      {row.updated_by_email ? ` ｜ 操作人：${row.updated_by_email}` : ""}
+                      {row.note ? ` ｜ 备注：${row.note}` : ""}
+                    </div>
                   </div>
                 ))
               )}

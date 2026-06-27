@@ -170,6 +170,15 @@ function buildSnapshotFromSubmission(s) {
   };
 }
 
+function canBuildRadarFromSnapshot(snapshot) {
+  return (
+    Array.isArray(snapshot?.subscores) &&
+    snapshot.subscores.length > 0 &&
+    snapshot?.dimscores &&
+    (Array.isArray(snapshot.dimscores) || typeof snapshot.dimscores === "object")
+  );
+}
+
 function sanitizeFileName(name) {
   return String(name || "download")
     .replace(/[\\/:*?"<>|]/g, "_")
@@ -249,6 +258,9 @@ export default function App() {
   const [reportsErr, setReportsErr] = useState("");
   const [selectedReportIds, setSelectedReportIds] = useState([]);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [batchGenerateBusy, setBatchGenerateBusy] = useState(false);
+  const [batchGenerateStatus, setBatchGenerateStatus] = useState("");
+  const [batchGenerateFailures, setBatchGenerateFailures] = useState([]);
 
   // admin users
   const [adminUsers, setAdminUsers] = useState([]);
@@ -295,6 +307,9 @@ export default function App() {
       setReports([]);
       setReportsErr("");
       setSelectedReportIds([]);
+      setBatchGenerateBusy(false);
+      setBatchGenerateStatus("");
+      setBatchGenerateFailures([]);
       setAdminUsers([]);
       setAdminUsersErr("");
       setRetestAllowances([]);
@@ -506,6 +521,31 @@ export default function App() {
     return m;
   }, [reports]);
 
+  const selectedReports = useMemo(
+    () => reports.filter((r) => selectedReportIds.includes(r.id)),
+    [reports, selectedReportIds]
+  );
+
+  function getSnapshotForReport(reportRow) {
+    const liveSubmission = subs.find((s) => s?.id === reportRow?.submission_id);
+    return liveSubmission ? buildSnapshotFromSubmission(liveSubmission) : reportRow?.snapshot || {};
+  }
+
+  const selectedDownloadableReports = useMemo(
+    () => selectedReports.filter((r) => r.status === "done" && !!r.pdf_path),
+    [selectedReports]
+  );
+
+  const selectedGeneratableReports = useMemo(
+    () =>
+      selectedReports.filter((r) => {
+        const needsPdf = r.status !== "done" || !r.pdf_path;
+        return needsPdf && canBuildRadarFromSnapshot(getSnapshotForReport(r));
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedReports, subs]
+  );
+
   async function signIn(e) {
     e.preventDefault();
     setLoginErr("");
@@ -521,6 +561,9 @@ export default function App() {
     setSubs([]);
     setReports([]);
     setSelectedReportIds([]);
+    setBatchGenerateBusy(false);
+    setBatchGenerateStatus("");
+    setBatchGenerateFailures([]);
     setAdminUsers([]);
     setAdminUsersErr("");
     setPreview(null);
@@ -534,23 +577,35 @@ export default function App() {
   function toggleReportSelection(reportId) {
     setSelectedReportIds((prev) => {
       if (prev.includes(reportId)) return prev.filter((id) => id !== reportId);
-      if (prev.length >= 10) {
-        alert("最多一次选择 10 份报告");
-        return prev;
-      }
       return [...prev, reportId];
     });
   }
 
+  function toggleSelectAllReports() {
+    setSelectedReportIds((prev) => {
+      if (reports.length > 0 && prev.length === reports.length) return [];
+      return reports.map((r) => r.id).filter(Boolean);
+    });
+  }
+
   async function startBatchDownload() {
+    const ids = selectedDownloadableReports.map((r) => r.id);
     if (!selectedReportIds.length) {
       alert("请先选择要批量下载的报告");
+      return;
+    }
+    if (!ids.length) {
+      alert("选中的报告里还没有可下载的 PDF，请先生成 PDF。");
+      return;
+    }
+    if (ids.length > 10) {
+      alert("批量下载一次最多支持 10 份已生成 PDF 的报告。");
       return;
     }
     setBatchBusy(true);
     try {
       const token = await getAccessTokenOrThrow();
-      const data = await batchDownloadReports(token, selectedReportIds);
+      const data = await batchDownloadReports(token, ids);
       openSignedUrl(data?.zip?.url);
       setSelectedReportIds([]);
     } catch (e) {
@@ -772,11 +827,16 @@ export default function App() {
   }
 
   // ✅ 点击“生成PDF(含雷达图)”：启动隐藏雷达 job
-  function startGeneratePdfWithRadar(reportRow) {
+  function startGeneratePdfWithRadar(reportRow, options = {}) {
     const liveSubmission = subs.find((s) => s?.id === reportRow?.submission_id);
     const snap = liveSubmission ? buildSnapshotFromSubmission(liveSubmission) : reportRow?.snapshot || {};
     const { subMap, dimMap } = buildScoreMapsFromSnapshot(snap);
     if (!Object.keys(subMap).length || !Object.keys(dimMap).length) {
+      const error = new Error("该报告没有可用于雷达图的测评数据，无法生成雷达图");
+      if (options.onError) {
+        options.onError(error);
+        return false;
+      }
       alert("该报告没有可用于雷达图的测评数据，无法生成雷达图");
       return;
     }
@@ -787,7 +847,16 @@ export default function App() {
 
     radarJobApiRef.current = null;
     setRadarJobReady(false);
-    setRadarJob({ reportRow, subMap, dimMap, title });
+    setRadarJob({
+      reportRow,
+      subMap,
+      dimMap,
+      title,
+      openWhenDone: options.openWhenDone !== false,
+      onDone: options.onDone,
+      onError: options.onError,
+    });
+    return true;
   }
 
   // ✅ 隐藏图 onReady：稳定引用 + ref 保存 api
@@ -826,14 +895,20 @@ export default function App() {
         const doneData = await waitReportDone(reportRow.submission_id);
 
         // 3) 打开 signed url
-        openSignedUrl(doneData?.pdf?.url);
+        if (radarJob.openWhenDone !== false) openSignedUrl(doneData?.pdf?.url);
 
         // 4) 刷新列表
         await fetchReports();
         clearActiveReportJob();
+        if (radarJob.onDone) radarJob.onDone(doneData);
+        if (radarJob.openWhenDone === false) return;
 
         alert("PDF 已生成 ✅");
       } catch (e) {
+        if (radarJob.onError) {
+          radarJob.onError(e);
+          return;
+        }
         alert("生成PDF失败：\n" + (e?.message || String(e)));
       } finally {
         radarJobApiRef.current = null;
@@ -844,6 +919,58 @@ export default function App() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [radarJob, radarJobReady]);
+
+  function generatePdfWithRadarQueued(reportRow) {
+    return new Promise((resolve, reject) => {
+      const started = startGeneratePdfWithRadar(reportRow, {
+        openWhenDone: false,
+        onDone: resolve,
+        onError: reject,
+      });
+      if (!started) reject(new Error("无法启动报告生成任务"));
+    });
+  }
+
+  async function startBatchGeneratePdf() {
+    if (batchGenerateBusy) return;
+
+    const candidates = selectedGeneratableReports;
+    if (!candidates.length) {
+      alert("当前选中的报告没有需要批量生成的项目。已生成 PDF 的报告会被自动跳过。");
+      return;
+    }
+
+    setBatchGenerateBusy(true);
+    setBatchGenerateFailures([]);
+
+    const failures = [];
+    try {
+      for (let i = 0; i < candidates.length; i += 1) {
+        const row = candidates[i];
+        const snap = getSnapshotForReport(row);
+        const title = `${snap.name || "-"}｜${snap.company || "-"}`;
+        setBatchGenerateStatus(`正在生成 ${i + 1}/${candidates.length}：${title}`);
+
+        try {
+          await generatePdfWithRadarQueued(row);
+        } catch (err) {
+          failures.push({
+            id: row.id,
+            name: snap.name || "-",
+            company: snap.company || "-",
+            error: err?.message || String(err),
+          });
+          setBatchGenerateFailures([...failures]);
+        }
+      }
+
+      await fetchReports();
+      setBatchGenerateStatus(`批量生成完成：成功 ${candidates.length - failures.length}/${candidates.length}`);
+      alert(failures.length ? `批量生成完成，但有 ${failures.length} 份失败。` : "批量生成完成。");
+    } finally {
+      setBatchGenerateBusy(false);
+    }
+  }
 
   // ---------- styles ----------
   const page = { minHeight: "100vh", background: "#fff", color: "#0f172a", padding: 24 };
@@ -1260,13 +1387,31 @@ export default function App() {
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
               <div style={{ fontWeight: 800 }}>Reports（最近 200 条）</div>
               <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
-                <span style={{ color: "#64748b", fontSize: 12 }}>已选：{selectedReportIds.length}/10</span>
-                <button type="button" style={btnPrimary} disabled={batchBusy || selectedReportIds.length === 0} onClick={startBatchDownload}>
+                <span style={{ color: "#64748b", fontSize: 12 }}>已选：{selectedReportIds.length}/{reports.length}</span>
+                <button type="button" style={btn} disabled={reports.length === 0} onClick={toggleSelectAllReports}>
+                  {reports.length > 0 && selectedReportIds.length === reports.length ? "取消全选" : "全选当前列表"}
+                </button>
+                <button type="button" style={btnPrimary} disabled={batchGenerateBusy || selectedGeneratableReports.length === 0} onClick={startBatchGeneratePdf}>
+                  {batchGenerateBusy ? "批量生成中..." : `批量生成PDF(${selectedGeneratableReports.length})`}
+                </button>
+                <button type="button" style={btnPrimary} disabled={batchBusy || selectedDownloadableReports.length === 0} onClick={startBatchDownload}>
                   {batchBusy ? "打包中..." : "批量下载"}
                 </button>
                 {loadingReports ? <div style={{ color: "#64748b", fontSize: 12 }}>加载中…</div> : null}
               </div>
             </div>
+
+            {batchGenerateStatus ? (
+              <div style={{ marginTop: 10, color: "#475569", fontSize: 12, lineHeight: 1.6 }}>
+                {batchGenerateStatus}
+                {batchGenerateFailures.length ? (
+                  <div style={{ marginTop: 4, color: "#b91c1c", whiteSpace: "pre-wrap" }}>
+                    {batchGenerateFailures.slice(0, 3).map((f) => `${f.name}｜${f.company}：${f.error}`).join("\n")}
+                    {batchGenerateFailures.length > 3 ? `\n还有 ${batchGenerateFailures.length - 3} 条失败未显示` : ""}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {reportsErr ? (
               <div style={{ marginTop: 12, color: "#dc2626", fontSize: 12, whiteSpace: "pre-wrap" }}>读取 reports 失败：{reportsErr}</div>
@@ -1278,7 +1423,6 @@ export default function App() {
                   reports.map((r) => {
                     const liveSubmission = subs.find((s) => s?.id === r?.submission_id);
                     const snap = liveSubmission ? buildSnapshotFromSubmission(liveSubmission) : r.snapshot || {};
-                    const canBatchDownload = r.status === "done" && !!r.pdf_path;
                     const canPreviewRadar =
                       (Array.isArray(snap?.subscores) && snap.subscores.length > 0) &&
                       (snap?.dimscores && (Array.isArray(snap.dimscores) || typeof snap.dimscores === "object"));
@@ -1290,9 +1434,8 @@ export default function App() {
                             <input
                               type="checkbox"
                               checked={selectedReportIds.includes(r.id)}
-                              disabled={!canBatchDownload}
                               onChange={() => toggleReportSelection(r.id)}
-                              title={canBatchDownload ? "选择批量下载" : "只有已生成 PDF 的报告可以批量下载"}
+                              title="选择报告，可用于批量生成或批量下载"
                             />
                             <div style={{ fontWeight: 800 }}>
                               {(snap.name || r.name || "-") + " ｜ " + (snap.company || r.company || "-")}

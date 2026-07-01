@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import RadarSemiRadar from "./RadarSemiRadar";
 import ReportTemplate from "./ReportTemplate.jsx";
-import { reportGenerateAsync, reportSignedUrl, waitReportDone } from "./lib/reportApi.js";
-import { allowRetest, batchDownloadReports, createAdminUser, disableAdminUser, listAdminUsers, listRetestAllowances } from "./lib/adminApi.js";
+import { downloadReportViaRelay, reportGenerateAsync, waitReportDone } from "./lib/reportApi.js";
+import { allowRetest, batchDownloadReportsFile, createAdminUser, disableAdminUser, listAdminUsers, listRetestAllowances } from "./lib/adminApi.js";
 
 
 window.supabase = supabase;
@@ -494,7 +494,7 @@ export default function App() {
     (async () => {
       try {
         const doneData = await waitReportDone(job.submission_id, 2000, 180000);
-        openSignedUrl(doneData?.pdf?.url);
+        await downloadReportViaRelay(job.submission_id, doneData?.pdf?.filename || "领导力测评报告.pdf");
         clearActiveReportJob();
         await fetchReports();
       } catch {
@@ -605,8 +605,7 @@ export default function App() {
     setBatchBusy(true);
     try {
       const token = await getAccessTokenOrThrow();
-      const data = await batchDownloadReports(token, ids);
-      openSignedUrl(data?.zip?.url);
+      await batchDownloadReportsFile(token, ids);
       setSelectedReportIds([]);
     } catch (e) {
       alert("批量下载失败：\n" + (e?.message || String(e)));
@@ -619,8 +618,7 @@ export default function App() {
     if (!reportRow?.submission_id) return;
     setBusyId(reportRow.id);
     try {
-      const data = await reportSignedUrl(reportRow.submission_id);
-      openSignedUrl(data?.pdf?.url);
+      await downloadReportViaRelay(reportRow.submission_id, reportRow.file_name || "领导力测评报告.pdf");
     } catch (e) {
       alert("下载报告失败：\n" + (e?.message || String(e)));
     } finally {
@@ -894,8 +892,13 @@ export default function App() {
         // 2) 轮询直到 done（拿到 pdf.url）
         const doneData = await waitReportDone(reportRow.submission_id);
 
-        // 3) 打开 signed url
-        if (radarJob.openWhenDone !== false) openSignedUrl(doneData?.pdf?.url);
+        // 3) 通过 report-api 中转下载
+        if (radarJob.openWhenDone !== false) {
+          await downloadReportViaRelay(
+            reportRow.submission_id,
+            reportRow.file_name || doneData?.pdf?.filename || "领导力测评报告.pdf"
+          );
+        }
 
         // 4) 刷新列表
         await fetchReports();
